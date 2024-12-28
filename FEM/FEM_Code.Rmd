@@ -1,0 +1,813 @@
+---
+title: "Grupo 4"
+output: html_document
+date: "2024-12-08"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Pacotes
+
+Os seguintes pacotes são necessários para a execução do código:
+
+```{r}
+knitr::opts_chunk$set(echo = F)
+library(car)
+library(MASS)
+library(pROC)
+library(gtsummary)
+library(cardx)
+library(broom.helpers)
+library(tidyverse)
+library(tidyr)
+library(ggplot2)
+library(caret)
+library(ggstatsplot)
+library(gridExtra)
+library(webshot2)
+library(readr)
+```
+
+## Tratamento dos dados
+
+Começamos por fazer um tratamento dos dados, como atribuir nomes às variáveis, eliminar possíveis NAs e transformar em fatores:
+
+```{r}
+dados<- read_csv("processed.cleveland.data",col_names = FALSE)
+names(dados)=c("Age", "Sex", "CP", "Trestbps", "Chol", "Fbs", "Restecg", "Thalach", "Exang","Oldpeak", "Slope", "Ca", "Thal", "Num")
+dados=na.omit(dados)
+dados$Num = as.factor(dados$Num)
+
+dados$Thal[dados$Thal=="3.0"]=3 
+dados$Thal[dados$Thal=="6.0"]=6
+dados$Thal[dados$Thal=="7.0"]=7
+which(dados$Thal=="?")
+dados$Thal[dados$Thal=="?"]=median(dados$Thal[-c(88,267)])
+which(dados$Thal=="?")
+
+dados$Thal=factor(dados$Thal, levels=c(3, 6, 7))
+
+
+dados$Ca[dados$Ca=="0.0"]=0 
+dados$Ca[dados$Ca=="1.0"]=1
+dados$Ca[dados$Ca=="2.0"]=2
+dados$Ca[dados$Ca=="3.0"]=3
+which(dados$Ca=="?")
+dados$Ca[dados$Ca=="?"]=median(dados$Ca[-c(167,193,288,303)])
+
+dados$Thal=factor(dados$Thal, levels=c("3", "6", "7"))
+dados$Ca=as.factor(dados$Ca)
+
+dados$Slope=as.factor(dados$Slope)
+dados$Sex=as.factor(dados$Sex)
+dados$Fbs=as.factor(dados$Fbs)
+dados$Restecg=as.factor(dados$Restecg)
+dados$Exang=as.factor(dados$Exang)
+
+
+dados$CP[dados$CP==1]="Typical angina" 
+dados$CP[dados$CP==2]="Atypical angina"
+dados$CP[dados$CP==3]="Non-anginal pain"
+dados$CP[dados$CP==4]="Asymptomatic"
+dados$CP=as.factor(dados$CP)
+table(dados$CP)
+
+dados$HD=ifelse(dados$Num == 0, 0, 1)
+dados$HD=as.factor(dados$HD)
+levels(dados$HD)=c("No", "Yes")
+levels(dados$Sex)=c("Female", "Male")
+levels(dados$Fbs)=c("No", "Yes")
+levels(dados$Slope)=c("Upsloping", "Flat","Downsloping")
+levels(dados$Exang)=c("No", "Yes")
+
+
+
+dados=as.data.frame(dados)
+str(dados)
+dados$Num=NULL
+View(dados)
+```
+
+## Correlação de variáveis
+
+**Avaliar a normalidade:**
+
+```{r}
+
+#H0: os dados são provenientes de uma distribuição normal vs. H1: os dados não são provenientes de uma distribuição normal.
+
+shapiro.test(dados$Age) #p-value = 0.006069<0.05 
+shapiro.test(dados$Trestbps) #p-value = 1.802e-06<0.05
+shapiro.test(dados$Chol) #p-value = 5.912e-09<0.05
+shapiro.test(dados$Thalach) #p-value = 6.996e-05<0.05
+shapiro.test(dados$Oldpeak) #p-value < 2.2e-16<0.05
+
+#As variáveis não seguem uma distribuição normal.
+```
+##Definição da base de dados com valores não-numéricos
+
+Esta base de dados foi criada com intenção de fazer plots e tabelas com uma descrição mais pormenorizada (invés de um número associado a uma condição), com o intuito de facilitar a compreensão do conjunto de dados.
+
+```{r}
+
+new_data <- na.omit(dados)
+
+
+new_data$Thal=as.character(new_data$Thal)
+
+new_data$Thal[new_data$Thal=='3']="Normal" 
+new_data$Thal[new_data$Thal=='6']="Fixed defect"
+new_data$Thal[new_data$Thal=='7']="Reversible defect"
+new_data$Thal=factor(new_data$Thal, levels=c("Normal", "Reversible defect", "Fixed defect"))
+
+new_data$Restecg=as.character(new_data$Restecg)
+
+new_data$Restecg[new_data$Restecg=='0']="Normal" 
+new_data$Restecg[new_data$Restecg=='1']="ST-T wave abnormality"
+new_data$Restecg[new_data$Restecg=='2']="Left ventricular hypertrophy"
+new_data$Restecg=factor(new_data$Restecg, levels=c("Normal", "ST-T wave abnormality", "Left ventricular hypertrophy")) 
+
+new_data$CP=as.numeric(new_data$CP)
+new_data$CP[new_data$CP==1]="Typical angina" 
+new_data$CP[new_data$CP==2]="Atypical angina"
+new_data$CP[new_data$CP==3]="Non-anginal pain"
+new_data$CP[new_data$CP==4]="Asymptomatic"
+new_data$CP=factor(new_data$CP, levels=c("Typical angina", "Atypical angina", "Non-anginal pain", "Asymptomatic"))
+
+new_data=as.data.frame(new_data)
+
+
+names(new_data) <- c(
+  "Age", "Sex", "Chest Pain Type", "Resting Blood Pressure", "Serum Cholesterol", 
+  "Fasting blood sugar > 120 mg/dL", "Resting ECG", "Max Heart Rate", 
+  "Exercise Induced Angina", "ST Depression", "Slope", 
+  "Major Vessels colored by Fluoroscopy", "Thallium-201", "Heart Disease Diagnosis"
+)
+
+which(new_data=="?")
+
+```
+
+
+Gráficos das variáveis:
+
+```{r}
+
+custom_colors <- c("#264653", "#E76F51", "#2A9D8F", "#E9C46A", "#F4A261")
+ggplot2::scale_fill_manual(values = custom_colors)
+ggplot2::scale_color_manual(values = custom_colors)
+
+# Comparação entre idade e Diagnóstico
+gg_idade <- ggstatsplot::ggbetweenstats(
+  data = dados,
+  x = HD,  
+  y = Age,
+  xlab="Heart Disease",
+  ylab="Age",
+  type = "nonparametric", 
+  pairwise.comparisons = TRUE,  
+  mean.ci = TRUE,  
+  title = "Comparison of Age by Heart Disease Diagnosis",
+  messages = FALSE
+)
+
+gg_idade
+
+# Comparação entre oldpeak e Diagnóstico
+gg_oldpeak <- ggstatsplot::ggbetweenstats(
+  data = dados,
+  x = HD,  
+  y = Oldpeak,
+  xlab="Heart Disease",
+  ylab="ST variable depression",
+  type = "nonparametric", 
+  pairwise.comparisons = TRUE,  
+  mean.ci = TRUE,  
+  title = "Comparison of ST variable depression by Heart Disease Diagnosis",
+  messages = FALSE
+)
+
+gg_oldpeak
+
+# Comparação entre Sexo e Diagnóstico
+gg_sexo <- ggstatsplot::ggbarstats(
+  data = dados,
+  x = Sex, 
+  y = HD,    
+  xlab="Heart Disease",
+  ylab="Percentage of Patients",
+  type = "nonparametric", 
+  title = "Comparison of Heart Disease Diagnosis Across Gender",
+  palette = "Set2", 
+  messages = FALSE
+)
+
+gg_sexo
+
+# Comparação entre níveis de Glicémia e Diagnóstico
+gg_fbs <- ggstatsplot::ggbarstats(
+  data = new_data,
+  x = 'Fasting blood sugar > 120 mg/dL', 
+  y = 'Heart Disease Diagnosis',    
+  xlab="Heart Disease",
+  ylab="Percentage of Patients",
+  type = "nonparametric", 
+  title = "Comparison of Fasting Blood Sugar by Heart Disease Diagnosis",
+  palette = "Set2", 
+  messages = FALSE
+)
+gg_fbs
+
+gg_exang <- ggstatsplot::ggbarstats(
+  data = new_data,
+  x = 'Exercise Induced Angina', 
+  y = 'Heart Disease Diagnosis',    
+  xlab="Heart Disease",
+  ylab="Percentage of Patients",
+  type = "nonparametric", 
+  title = "Comparison of Exercise-Induced Angina by Heart Disease Diagnosis",
+  palette = "Set2", 
+  messages = FALSE
+)
+gg_exang
+
+# Comparação entre COLESTEROL e Diagnóstico
+gg_chol <- ggstatsplot::ggbetweenstats(
+  data = dados,
+  x = HD,  
+  y = Chol,  
+  xlab="Heart Disease",
+  ylab="Serum Cholesterol Levels (mg/dL)",
+  type = "nonparametric", 
+  pairwise.comparisons = TRUE,  
+  mean.ci = TRUE,  
+  title = "Comparison of Cholesterol by Heart Disease Diagnosis",
+  messages = FALSE
+)
+gg_chol
+
+# Comparação entre dor no peito e Diagnóstico
+gg_cp <- ggstatsplot::ggbarstats(
+  data = new_data,
+  x = 'Chest Pain Type', 
+  y = 'Heart Disease Diagnosis', 
+  xlab="Heart Disease",
+  ylab="Percentage of Patients",
+  type = "nonparametric", 
+  title = "Comparison of Chest Pain by Heart Disease Diagnosis",
+  palette = "Set2", 
+  messages = FALSE
+)
+gg_cp
+
+# Comparação entre ECG e Diagnóstico
+gg_ecg <- ggstatsplot::ggbarstats(
+  data = new_data,
+  x = 'Resting ECG', 
+  y = 'Heart Disease Diagnosis', 
+  xlab="Heart Disease",
+  ylab="Percentage of Patients",
+  type = "nonparametric", 
+  title = "Comparison of Resting ECG by Heart Disease Diagnosis",
+  palette = "Set2", 
+  messages = FALSE
+)
+gg_ecg
+
+# Comparação entre Slope e Diagnóstico
+gg_slope <- ggstatsplot::ggbarstats(
+  data = new_data,
+  x = 'Slope', 
+  y = 'Heart Disease Diagnosis', 
+  xlab="Heart Disease",
+  ylab="Percentage of Patients",
+  type = "nonparametric", 
+  title = "Comparison of Slope peak exercise ST segment by Heart Disease Diagnosis",
+  palette = "Set2", 
+  messages = FALSE
+)
+gg_slope
+
+# Comparação entre Thal e Diagnóstico
+gg_thal <- ggstatsplot::ggbarstats(
+  data = new_data,
+  x = 'Thallium-201', 
+  y = 'Heart Disease Diagnosis',  
+  xlab="Heart Disease",
+  ylab="Percentage of Patients",
+  type = "nonparametric", 
+  title = "Comparison of Thallium-201 stress scintigraphy
+levels by HD Diagnosis",
+  palette = "Set2", 
+  messages = FALSE
+)
+gg_thal
+
+gg_ca <- ggstatsplot::ggbarstats(
+  data = dados,
+  x = Ca, 
+  y = HD, 
+  xlab="Heart Disease",
+  ylab="Percentage of Patients",
+  type = "nonparametric", 
+  title = "Comparison of no. of major vessels colored by Heart Disease Diagnosis",
+  palette = "Set2", 
+  messages = FALSE
+)
+gg_ca
+
+
+# Comparação entre pressão sanguínea e Diagnóstico
+gg_ps <- ggstatsplot::ggbetweenstats(
+  data = dados,
+  x = HD,  
+  y = Trestbps,  
+  xlab="Heart Disease",
+  ylab="Resting Blood Pressure (mmHg)",
+  type = "nonparametric", 
+  pairwise.comparisons = TRUE,  
+  mean.ci = TRUE,  
+  title = "Comparison of Resting Blood Pressure by Heart Disease Diagnosis",
+  messages = FALSE
+) 
+gg_ps
+
+# Comparação entre frequência cardíaca máxima e Diagnóstico
+gg_freq <- ggstatsplot::ggbetweenstats(
+  data = dados,
+  x = HD,  
+  y = Thalach,
+  xlab="Heart Disease",
+  ylab="Maximum Cardiac Frequency (BPM)",
+  type = "nonparametric", 
+  pairwise.comparisons = TRUE,  
+  mean.ci = TRUE,  
+  title = "Comparison of Maximum Heart Rate by Heart Disease Diagnosis",
+  messages = FALSE
+)
+gg_freq
+# Juntar os gráficos
+grid.arrange(
+  gg_sexo, gg_idade, gg_chol, gg_freq, gg_ps, gg_cp,
+  ncol = 3,
+  nrow = 2
+)
+
+```
+
+Tabelas de frequências: 
+```{r}
+
+#ATENÇÃO!! ESTAS FUNÇÕES NÃO FUNCIONAM SE O PACOTE MASS ESTIVER CARREGADO.
+#contorno:
+tab1= dados  %>% dplyr::select(Fbs,HD) %>%
+  tbl_cross(row = HD,
+            col = Fbs,
+            label = c(HD ~ "Heart Disease", Fbs ~ "Fasting Blood Sugar > 120 mg/dL")) %>% bold_labels()
+tab1
+
+
+tab2= dados  %>% dplyr::select(Sex,HD) %>%
+  tbl_cross(row = HD,
+            col = Sex,
+            label = HD ~ "Heart Disease") %>% bold_labels()
+tab2
+
+tab3= dados  %>% dplyr::select(Exang,HD) %>%
+  tbl_cross(row = HD,
+            col = Exang,
+            label = c(HD ~ "Heart Disease", Exang ~ "Exercise-Induced Angina")) %>% bold_labels()
+tab3
+
+tab4= new_data  %>% dplyr::select('Chest Pain Type', 'Heart Disease Diagnosis') %>%
+  tbl_cross(row = 'Heart Disease Diagnosis',
+            col = 'Chest Pain Type',
+            label = c('Heart Disease Diagnosis' ~ "Heart Disease", 'Chest Pain Type' ~ "Chest Pain Type")) %>% bold_labels()
+tab4
+
+tab5= dados  %>% dplyr::select(CP,HD) %>%
+  tbl_cross(row = HD,
+            col = CP,
+            label = c(HD ~ "Heart Disease", CP ~ "Chest Pain Type")) %>% bold_labels()
+tab5
+
+tab6= new_data  %>% dplyr::select('Resting ECG', 'Heart Disease Diagnosis') %>%
+  tbl_cross(row = 'Heart Disease Diagnosis',
+            col = 'Resting ECG',
+            label = c('Heart Disease Diagnosis' ~ "Heart Disease", 'Resting ECG' ~ "Resting ECG")) %>% bold_labels()
+tab6
+
+tab7= new_data  %>% dplyr::select('Slope', 'Heart Disease Diagnosis') %>%
+  tbl_cross(row = 'Heart Disease Diagnosis',
+            col = 'Slope',
+            label = c('Heart Disease Diagnosis' ~ "Heart Disease", 'Slope' ~ "Slope of peak exercise ST segment")) %>% bold_labels()
+tab7
+
+tab8= dados  %>% dplyr::select(Ca, HD) %>%
+  tbl_cross(row = HD,
+            col = Ca,
+            label = c(HD ~ "Heart Disease", Ca ~ "Number of major vessels colored by fluoroscopy")) %>% bold_labels()
+tab8
+
+tab9= new_data  %>% dplyr::select('Thallium-201', 'Heart Disease Diagnosis') %>%
+  tbl_cross(row = 'Heart Disease Diagnosis',
+            col = 'Thallium-201',
+            label = c('Heart Disease Diagnosis' ~ "Heart Disease", 'Thallium-201' ~ "Thallium-201 Stress Scintigraphy")) %>% bold_labels()
+tab9
+```
+
+
+#Testes das variáveis contínuas
+```{r}
+
+# Teste de Mann-Whitney U para pressão arterial e HD
+
+# H0: Não há diferença significativa na pressão arterial dos pacientes com diagnóstico de HD.
+#vs
+# H1: Há diferença significativa na pressão arterial dos pacientes com diagnóstico de HD.
+wilcox_test_trestbps <- wilcox.test(Trestbps ~ HD, data = dados)
+print(wilcox_test_trestbps)
+# p-value:0.02597 -> rejeitamos H0, logo a difrenca é significativa na pressao arterial dos pacientes com o diagonostico de HD 
+
+# Teste de Mann-Whitney U para colesterol e HD
+
+# H0: Não há diferença significativa no colesterol dos pacientes com diagnóstico de HD.
+#vs
+# H1: Há diferença significativa no colesterol dos pacientes com diagnóstico de HD.
+wilcox_test_chol <- wilcox.test(Chol ~ HD, data = dados)
+print(wilcox_test_chol)
+#p-value: 0.03536 -> rejeitamos H0, logo a difrenca é significativa no colesterol dos pacientes com o diagonostico de HD 
+
+# Teste de Mann-Whitney U para Frequência cardíaca máxima e HD
+
+# H0: Não há diferença significativa na frequência cardíaca máxima dos pacientes com diagnóstico de HD.
+#vs
+# H1: Há diferença significativa na frequência cardíaca máxima dos pacientes com diagnóstico de HD.
+wilcox_test_thalach <- wilcox.test(Thalach ~ HD, data = dados)
+print(wilcox_test_thalach)
+#p-value: 1.861e-13 -> rejeitamos H0, logo a difrença é significativa na frequência cardíaca máxima dos pacientes com o diagonostico de HD 
+
+# Teste de Mann-Whitney U para oldpeak e HD
+
+# H0: Não há diferença significativa no segmento entre as ondas S e T de um ECG dos pacientes com diagnóstico de HD.
+#vs
+# H1: Há diferença significativa no segmento entre as ondas S e T de um ECG dos pacientes com diagnóstico de HD.
+wilcox_test_oldpeak <- wilcox.test(Oldpeak ~ HD, data = dados)
+print(wilcox_test_oldpeak)
+#p-value: 6.813e-13 -> rejeitamos H0, logo a diferença é significativa no segmento entre as ondas S e T de um ECG dos pacientes com o diagonostico de HD.
+```
+
+
+#Testes para as variáves categóricas
+```{r}
+# Teste Qui-Quadrado para sex e HD
+
+# H0: Não há diferença significativa entre a proporção de homens e mulheres diagnosticados com doença cardíaca
+#vs
+# H1: A proporção de homens diagnosticados com doença cardíaca é significativamente maior do que a de mulheres.
+table_sex_hd <- table(dados$Sex, dados$HD)
+chisq_test_sex <- chisq.test(table_sex_hd)
+print(chisq_test_sex)
+#p-value: 2.667e-06 -> rejeitamos H0, logo a proporção de homens diagnosticados com doença cardíaca é significativamente maior do que a de mulheres.
+
+
+# Teste Qui-Quadrado para cp e HD
+table_cp_hd <- table(dados$CP, dados$HD)
+chisq_test_cp <- chisq.test(table_cp_hd)
+print(chisq_test_cp)
+#p-value: 2.2e-16 -> rejeitamos H0
+
+
+# Teste Qui-Quadrado para fbs e HD
+
+# H0: Não há diferença significativa entre a proporção de pacientes com glicémia < 120 mg/dL e doença cardíaca e pacientes com glicémia >= 120 mg/dL e doença cardíaca
+#vs
+# H1: A proporção de pacientes com glicémia < 120 mg/dL e doença cardíaca é significativamente maior do que pacientes com glicémia >= 120 mg/dL e doença cardíaca
+table_fbs_hd <- table(dados$Fbs, dados$HD)
+chisq_test_fbs <- chisq.test(table_fbs_hd)
+print(chisq_test_fbs)
+#p-value 0.7813 -> não rejeição de H0
+
+
+# H0: Não há diferença significativa entre a proporção de grupos de diferenças em ECG's doença cardíaca
+#vs
+# H1: Há diferenças significativas entre a proporção de grupos de diferenças em ECG's doença cardíaca
+# Teste Qui-Quadrado para restecg e HD
+table_restecg_hd <- table(dados$Restecg, dados$HD)
+chisq_test_restecg <- chisq.test(table_restecg_hd)
+print(chisq_test_restecg)
+#p-value: 0.006567 -> rejeição de H0
+
+
+# H0: Não há diferença significativa entre a proporção de grupos de diferenças em ECG's de pacientes sem e com doença cardíaca
+#vs
+# H1: Há diferenças significativas entre a proporção de grupos de diferenças em ECG's de pacientes sem e com doença cardíaca
+# Teste Qui-Quadrado para exang e HD
+table_exang_hd <- table(dados$Exang, dados$HD)
+chisq_test_exang <- chisq.test(table_exang_hd)
+print(chisq_test_exang)
+#p-value: 1.414e-13 -> rejeição de H0
+
+
+# H0: Não há diferença significativa entre as curvas ST de pacientes sem e com doença cardíaca
+#vs
+# H1: Há diferenças significativas entre as curvas ST de pacientes sem e com doença cardíaca
+# Teste Qui-Quadrado para slope e HD
+table_slope_hd <- table(dados$Slope, dados$HD)
+chisq_test_slope <- chisq.test(table_slope_hd)
+print(chisq_test_slope)
+#p-value: 1.143e-10 -> rejeição de H0
+
+
+# H0: Não há diferença significativa entre o número de veias preenchidas por fluoroscopia entre pacientes sem e com doença cardíaca
+#vs
+# H1: Há diferenças significativas entre número de veias preenchidas por fluoroscopia entre os pacientes sem e com doença cardíaca
+
+# Teste Qui-Quadrado para ca e HD
+table_ca_hd <- table(dados$Ca, dados$HD)
+chisq_test_ca <- chisq.test(table_ca_hd)
+print(chisq_test_ca)
+#p-value: 1.174e-15 -> rejeição de H0
+
+# H0: Não há diferença significativa entre as cintolografias por tálio-201 entre pacientes sem e com doença cardíaca
+#vs
+# H1: Há diferenças significativas entreas cintolografias por tálio-201 entre pacientes sem e com doença cardíaca
+
+# Teste Qui-Quadrado para thal e HD
+table_thal_hd <- table(dados$Thal, dados$HD)
+chisq_test_thal <- chisq.test(table_thal_hd)
+print(chisq_test_thal)
+#p-value: 2.2e-16 -> rejeição de H0
+
+```
+
+#Tabelas de sumário
+
+``` {r}
+summary_table <- tbl_summary(
+  data = new_data,            
+  by = "Heart Disease Diagnosis", 
+  statistic = list(
+    all_continuous() ~ "{median} ({p25}, {p75})",  
+    all_categorical() ~ "{n} ({p}%)"               
+  ),
+  digits = all_continuous() ~ 2,  
+     
+)
+
+
+summary_table <- add_p(
+  summary_table,
+  test = list(
+    all_continuous() ~ "wilcox.test",  
+    all_categorical() ~ "chisq.test"   
+  )
+)
+
+summary_table<-bold_p(summary_table,t = 0.05)
+summary_table <- bold_labels(summary_table)
+
+print(summary_table)
+
+as_gt(summary_table) %>%
+  gt::gtsave("tabela_summary.png") 
+
+
+```
+
+#Matriz de correlação
+
+Matriz de correlação utilizada como base para a análise de previsão da doença cardiovascular:
+
+```{r}
+ggcorrmat(dados,type="np")
+```
+
+## Regressão Logística
+
+```{r}
+modelo_completo=glm(formula = HD~., family = binomial(link = "logit"), data = dados)
+stepAIC(modelo_completo)
+
+modelo=glm(formula = HD ~ Sex + CP + Trestbps + Exang + Oldpeak + Slope + 
+    Ca + Thal, family = binomial(link = "logit"), data = dados)
+
+tabela_completa <- tbl_regression(
+  modelo_completo,
+  exponentiate = TRUE, 
+  pvalue_fun = ~style_pvalue(.x, digits = 3) 
+)
+
+tabela_formatada_completa <- tabela_completa %>%
+  bold_labels() %>%        
+  italicize_levels() %>%  
+  bold_p(t = 0.05) 
+
+tabela_formatada_completa
+
+tabela <- tbl_regression(
+  modelo,
+  exponentiate = TRUE, 
+  pvalue_fun = ~style_pvalue(.x, digits = 3) 
+)
+
+tabela_formatada <- tabela %>%
+  bold_labels() %>%        
+  italicize_levels() %>%  
+  bold_p(t = 0.05)         
+
+tabela_formatada
+```
+
+**Regressão Logística simples e múltipla:**
+
+```{r}
+tuni=tbl_uvregression(
+  data = dados,
+  method = glm,
+  method.args = list(family = binomial),
+  exponentiate = TRUE,
+  y =HD,  hide_n = TRUE,
+  pvalue_fun = function(x) style_pvalue(x, digits = 3)) %>%
+  bold_labels()%>%bold_p( t=0.05)
+
+tmult=tbl_regression(modelo, exponentiate = T,pvalue_fun = function(x) style_pvalue(x, digits = 3)) %>%bold_labels()%>%bold_p( t=0.05)
+
+tbl_merge_1 <-
+  tbl_merge(
+    tbls = list(tuni,tmult),
+    tab_spanner = c("Simples","Múltipla")
+  )
+
+tbl_merge_1 
+```
+
+#AIC do modelo de regressão logística
+```{r}
+
+modelo=glm(formula = HD ~ Sex + CP + Trestbps + Exang + Oldpeak + Slope + 
+    Ca + Thal, family = binomial(link = "logit"), data = dados)
+
+summary(modelo)
+
+
+#o modelo com o menor valor de AIC é HD ~ Sex + CP + Trestbps + Exang + Oldpeak + Slope + Ca + Thal.
+
+
+```
+
+
+#Treino e teste da RLog
+
+```{r}
+train <- dados[1:250,] #conjunto de treino
+test <- dados[251:303,] #conjunto de test
+
+logistic_train <-glm(HD ~ Sex + CP + Trestbps + Exang + Oldpeak + Slope + Ca + Thal, data=train, family="binomial")
+#View(logistic_train)
+predicted.data.train <- data.frame(probability.of.hd.train=logistic_train$fitted.values, hd=train$HD)
+#View(predicted.data.train)
+predicted.data.train <- predicted.data.train[order(predicted.data.train$probability.of.hd.train, decreasing = F),]
+predicted.data.train$rank <- 1:nrow(predicted.data.train)
+ggplot(data=predicted.data.train, aes(x=rank, y=probability.of.hd.train)) + geom_point(aes(color=hd), alpha=0.3, shape=4,stroke=1.1)+ xlab("Rank of Patient Number")+ylab("Predicted probability of getting heart disease")
+
+#fazendo o test:
+logistic_test <- glm(HD ~ Sex + CP + Trestbps + Exang + Oldpeak + Slope + Ca + Thal, data=test, family="binomial")
+#View(logistic_test)
+predicted.data.test <- data.frame(probability.of.hd.test=logistic_test$fitted.values, hd=test$HD)
+#View(predicted.data.test)
+predicted.data.test <- predicted.data.test[order(predicted.data.test$probability.of.hd.test, decreasing=F),]
+predicted.data.test$rank <- 1:nrow(predicted.data.test)
+
+ggplot(data=predicted.data.test, aes(x=rank, y=probability.of.hd.test)) + geom_point(aes(color=hd), alpha=0.3, shape=4,stroke=1.1)+ xlab("Rank of Patient Number")+ylab("Predicted probability of getting heart disease")
+
+
+logistic <- glm(HD ~ Sex + CP + Trestbps + Exang + Oldpeak + Slope + Ca + Thal, data=dados, family="binomial")
+summary(logistic)
+#View(logistic)
+predicted.data <- data.frame(probability.of.hd=logistic$fitted.values, hd=dados$HD)
+#View(predicted.data)
+predicted.data <- predicted.data[order(predicted.data$probability.of.hd, decreasing=F),]
+predicted.data$rank <- 1:nrow(predicted.data)
+print(sum(predicted.data.train$hd=="Yes"))
+
+model_fit <- train(HD ~ Sex + CP + Trestbps + Exang + Oldpeak + Slope + Ca + Thal, data=train, method='glm', family="binomial")
+pred=predict(model_fit, newdata=train)
+confusionMatrix(data=pred, train$HD)
+
+
+```
+
+#Avaliação do modelo
+```{r}
+
+vif(logistic_train)
+#não existe qualquer multicolineariedade entre as variáveis.
+```
+
+## Curva ROC e AUC
+
+```{r}
+# Valores preditos do modelo
+Valores_preditos=predict(modelo, type = 'response')
+
+# Calcular a curva ROC
+roc_curve=roc(dados$HD, Valores_preditos)
+
+# Calcular o AUC
+auc_modelo=auc(roc_curve)
+ci(auc_modelo)
+
+#Gráfico da curva ROC
+ggroc(roc_curve) +
+  geom_text(
+    aes(x = 0.7, y = 0.3, label = paste("AUC = ", round(auc_modelo, 2))),
+    size = 6, color = "black", fontface = "bold"
+  ) +
+  labs(title = "ROC curve", x = "False Positive Rate", y = "True Positive Rate") +
+  theme_minimal()
+
+```
+
+## Validação do modelo de Regressão Logística
+
+Realizámos a validação do modelo através do método de K-fold cross-validation com 10-fold:
+
+```{r}
+control=trainControl(method = "cv", number = 10, classProbs = TRUE, summaryFunction = twoClassSummary)
+
+modelo_cv=train(
+  HD ~ Age + Sex + Trestbps + Chol + Fbs + Restecg + Thalach + Exang + Oldpeak + Slope + Ca + Thal,
+  data = dados,
+  method = "glm",
+  family = binomial(link='logit'),
+  trControl = control,
+  metric = "ROC"
+)
+
+print(modelo_cv)
+
+```
+
+Para avaliar o desempenho da cross-validation, utilizámos duas métricas diferentes - AUC média e Accuracy:
+
+```{r}
+# AUC média:
+mean_auc=max(modelo_cv$results$ROC)
+cat("Average AUC: ", round(mean_auc, 3))
+
+#Accuracy
+preditos=ifelse(Valores_preditos > 0.5, 1, 0) # Converte em probabilidades de 0 e 1
+
+Matriz_confusao<- table(dados$HD, preditos)
+accuracy=sum(diag(Matriz_confusao)) / sum(Matriz_confusao)
+cat("Accuracy:", round(accuracy, 3))
+
+```
+
+#LOOCV
+
+```{r}
+
+#Modelo para determinar o accuracy
+control = trainControl(
+  method = "LOOCV",
+  classProbs = TRUE,           
+
+)
+
+modelo_loocv = train(
+  HD ~ Sex + CP + Trestbps + Exang + Oldpeak + Slope + Ca + Thal,
+  data = dados,
+  method = "glm", 
+  family = binomial(link='logit'),  
+  trControl = control,         
+  metric = "Accuracy"             
+)
+
+print(modelo_loocv)
+
+
+#Modelo para determinar o ROC, sensitividade e especificidade
+control = trainControl(
+  method = "LOOCV",
+  classProbs = TRUE,  
+  summaryFunction = twoClassSummary
+
+)
+
+modelo_loocv_roc = train(
+  HD ~ Sex + CP + Trestbps + Exang + Oldpeak + Slope + Ca + Thal,
+  data = dados,
+  method = "glm", 
+  family = binomial(link='logit'),  
+  trControl = control,         
+  metric = "ROC"             
+)
+
+print(modelo_loocv_roc)
+
+
+```
