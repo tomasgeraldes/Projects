@@ -1,0 +1,468 @@
+---
+title: "Markdown__Trabalho_LE"
+output: html_document
+date: "2024-10-26"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Laboratórios de Estatística - Código do trabalho
+
+Afonso D. Carreira, Marta F. Carvalho, Rita S. Marques, Tomás V. Geraldes
+
+Departamento de Ciências Médicas, Universidade de Aveiro
+
+## Preparação do conjunto de dados
+
+**Carregamento dos packages necessários**
+
+Para uma melhor experiência de código, recomenda-se que os seguintes packages sejam carregados:
+
+```{r}
+library(ggplot2)
+library(caret)
+
+```
+
+**Passagem do conjunto de dados a data frame e mudança do nome desta:**
+
+Para o carregamento do ficheiro com os dados fornecidos, supõe-se que o utilizador importe o dataset "heart_disease_health_indicators_BRFSS2015.csv", enviado em anexo.
+
+```{r}
+heart_disease_indicators=as.data.frame(heart_disease_health_indicators_BRFSS2015)
+```
+
+**Visualização dos nomes das variáveis presentes, verificação da presença de NA's e visualização dos dados:**
+
+```{r Visualização dos dados}
+names(heart_disease_indicators)
+View(heart_disease_indicators)
+sum(is.na(heart_disease_indicators)) #retorna 0
+```
+
+Aqui, procedeu-se a uma primeira visualização do conjunto de dados, verificando os nomes deste e a possível existência de missing values (NA's).
+
+**Alteração de todas as variáveis codificadas como numéricas para fatores:**
+
+Notas: 
+-A divisão dos grupos pelo índice de massa corporal foi feita segundo as classificações do NCBI.
+-As categorias de respostas que não seguem um padrão binário (i.e.: "Sim" ou "Não") foram definidas de acordo com os grupos de respostas do questionário.
+
+```{r Definição de fatores}
+# Variável 1: heart disease or attack (HeartDiseaseorAttack)
+heart_disease_indicators$HeartDiseaseorAttack[heart_disease_indicators$HeartDiseaseorAttack==0]="No"
+heart_disease_indicators$HeartDiseaseorAttack[heart_disease_indicators$HeartDiseaseorAttack==1]="Yes"
+heart_disease_indicators$HeartDiseaseorAttack=factor(heart_disease_indicators$HeartDiseaseorAttack, levels=c("No", "Yes"))
+
+# Variável 2: high blood pressure (HighBP)
+heart_disease_indicators$HighBP[heart_disease_indicators$HighBP==0]="No";heart_disease_indicators$HighBP[heart_disease_indicators$HighBP==1]="Yes"
+heart_disease_indicators$HighBP=factor(heart_disease_indicators$HighBP, levels=c("No", "Yes"))
+
+# Variável 3: high cholesterol (HighChol)
+heart_disease_indicators$HighChol[heart_disease_indicators$HighChol==0]="No";heart_disease_indicators$HighChol[heart_disease_indicators$HighChol==1]="Yes"
+heart_disease_indicators$HighChol=factor(heart_disease_indicators$HighChol, levels=c("No", "Yes"))
+
+# Variável 4: cholesterol check (CholCheck)
+heart_disease_indicators$CholCheck[heart_disease_indicators$CholCheck==0]="No";heart_disease_indicators$CholCheck[heart_disease_indicators$CholCheck==1]="Yes"
+heart_disease_indicators$CholCheck=factor(heart_disease_indicators$CholCheck, levels=c("No", "Yes"))
+
+#variável 5: body mass index (BMI)
+heart_disease_indicators$BMI[heart_disease_indicators$BMI<18.5]="Underweight"
+heart_disease_indicators$BMI[(heart_disease_indicators$BMI>=18.5)&(heart_disease_indicators$BMI<25)]="Normal weight"
+heart_disease_indicators$BMI[(heart_disease_indicators$BMI>=25)&(heart_disease_indicators$BMI<30)]="Overweight"
+heart_disease_indicators$BMI[(heart_disease_indicators$BMI>=30)&(heart_disease_indicators$BMI<35)]="Class 1 Obesity"
+heart_disease_indicators$BMI[(heart_disease_indicators$BMI>=35)&(heart_disease_indicators$BMI<40)]="Class 2 Obesity"
+heart_disease_indicators$BMI[(heart_disease_indicators$BMI>=40)&(heart_disease_indicators$BMI<=98)]="Class 3 Obesity"
+heart_disease_indicators$BMI=factor(heart_disease_indicators$BMI, levels=c("Underweight", "Normal weight", "Overweight", "Class 1 Obesity", "Class 2 Obesity", "Class 3 Obesity"))
+
+# Variável 6: Smoker
+heart_disease_indicators$Smoker[heart_disease_indicators$Smoker==0]="No";heart_disease_indicators$Smoker[heart_disease_indicators$Smoker==1]="Yes"
+heart_disease_indicators$Smoker=factor(heart_disease_indicators$Smoker, levels=c("No", "Yes"))
+
+# Variável 7: Stroke
+heart_disease_indicators$Stroke[heart_disease_indicators$Stroke==0]="No";heart_disease_indicators$Stroke[heart_disease_indicators$Stroke==1]="Yes"
+heart_disease_indicators$Stroke=factor(heart_disease_indicators$Stroke, levels=c("No", "Yes"))
+
+# Variável 8: Diabetes
+heart_disease_indicators$Diabetes[heart_disease_indicators$Diabetes==0]="No";heart_disease_indicators$Diabetes[heart_disease_indicators$Diabetes==1]="Pre-diabetic";heart_disease_indicators$Diabetes[heart_disease_indicators$Diabetes==2]="Diabetic"
+heart_disease_indicators$Diabetes=factor(heart_disease_indicators$Diabetes, levels=c("No", "Pre-diabetic", "Diabetic"))
+
+# Variável 9: physical activity (PhysActivity)
+heart_disease_indicators$PhysActivity[heart_disease_indicators$PhysActivity==0]="No";heart_disease_indicators$PhysActivity[heart_disease_indicators$PhysActivity==1]="Yes"
+heart_disease_indicators$PhysActivity=factor(heart_disease_indicators$PhysActivity, levels=c("No", "Yes"))
+
+# Variável 10: Fruits
+heart_disease_indicators$Fruits[heart_disease_indicators$Fruits==0]="No";heart_disease_indicators$Fruits[heart_disease_indicators$Fruits==1]="Yes"
+heart_disease_indicators$Fruits=factor(heart_disease_indicators$Fruits, levels=c("No", "Yes"))
+
+# Variável 11: Veggies
+heart_disease_indicators$Veggies[heart_disease_indicators$Veggies==0]="No";heart_disease_indicators$Veggies[heart_disease_indicators$Veggies==1]="Yes"
+heart_disease_indicators$Veggies=factor(heart_disease_indicators$Veggies, levels=c("No", "Yes"))
+
+# Variável 12: heavy alcohol consumption (HvyAlcoholConsump)
+heart_disease_indicators$HvyAlcoholConsump[heart_disease_indicators$HvyAlcoholConsump==0]="No";heart_disease_indicators$HvyAlcoholConsump[heart_disease_indicators$HvyAlcoholConsump==1]="Yes"
+heart_disease_indicators$HvyAlcoholConsump=factor(heart_disease_indicators$HvyAlcoholConsump, levels=c("No", "Yes"))
+
+# Variável 13: any healthcare (AnyHealthcare)
+heart_disease_indicators$AnyHealthcare[heart_disease_indicators$AnyHealthcare==0]="No";heart_disease_indicators$AnyHealthcare[heart_disease_indicators$AnyHealthcare==1]="Yes"
+heart_disease_indicators$AnyHealthcare=factor(heart_disease_indicators$AnyHealthcare, levels=c("No", "Yes"))
+
+# Variável 14: no doctor visit because of cost (NoDocbcCost)
+heart_disease_indicators$NoDocbcCost[heart_disease_indicators$NoDocbcCost==0]="Able to go to doctor";heart_disease_indicators$NoDocbcCost[heart_disease_indicators$NoDocbcCost==1]="Unable to go to doctor"
+heart_disease_indicators$NoDocbcCost=factor(heart_disease_indicators$NoDocbcCost, levels=c("Able to go to doctor", "Unable to go to doctor"))
+
+# Variável 18: difficulties walking (DiffWalk)
+heart_disease_indicators$DiffWalk[heart_disease_indicators$DiffWalk==0]="No";heart_disease_indicators$DiffWalk[heart_disease_indicators$DiffWalk==1]="Yes"
+heart_disease_indicators$DiffWalk=factor(heart_disease_indicators$DiffWalk, levels=c("No", "Yes"))
+
+# Variável 19: Sex
+heart_disease_indicators$Sex[heart_disease_indicators$Sex==0]="Female";heart_disease_indicators$Sex[heart_disease_indicators$Sex==1]="Male"
+heart_disease_indicators$Sex=factor(heart_disease_indicators$Sex, levels=c("Female", "Male"))
+
+# Variável 20: Age
+heart_disease_indicators$Age[heart_disease_indicators$Age==1]="18-24 years old";
+heart_disease_indicators$Age[heart_disease_indicators$Age==2]="25-30 years old"; 
+heart_disease_indicators$Age[heart_disease_indicators$Age==3]="31-35 years old";
+heart_disease_indicators$Age[heart_disease_indicators$Age==4]="36-40 years old";
+heart_disease_indicators$Age[heart_disease_indicators$Age==5]="41-45 years old";
+heart_disease_indicators$Age[heart_disease_indicators$Age==6]="46-50 years old";
+heart_disease_indicators$Age[heart_disease_indicators$Age==7]="51-55 years old";
+heart_disease_indicators$Age[heart_disease_indicators$Age==8]="56-60 years old";
+heart_disease_indicators$Age[heart_disease_indicators$Age==9]="61-65 years old";
+heart_disease_indicators$Age[heart_disease_indicators$Age==10]="66-70 years old";
+heart_disease_indicators$Age[heart_disease_indicators$Age==11]="71-75 years old";
+heart_disease_indicators$Age[heart_disease_indicators$Age==12]="75-79 years old";
+heart_disease_indicators$Age[heart_disease_indicators$Age==13]="Over 80 years old";
+heart_disease_indicators$Age=factor(heart_disease_indicators$Age, levels=c("18-24 years old", "25-30 years old", "31-35 years old", "36-40 years old", "41-45 years old", "46-50 years old", "51-55 years old","56-60 years old", "61-65 years old","66-70 years old","71-75 years old","75-79 years old", "Over 80 years old"))
+
+# Variável 21: Education
+heart_disease_indicators$Education[heart_disease_indicators$Education==1]="Never attended school or only attended kindergarten";heart_disease_indicators$Education[heart_disease_indicators$Education==2]="Grades 1 through 8 (Elementary)"; heart_disease_indicators$Education[heart_disease_indicators$Education==3]="Grades 9 through 11 (Some high school)";heart_disease_indicators$Education[heart_disease_indicators$Education==4]="Grade 12 or GED (High school graduate)";heart_disease_indicators$Education[heart_disease_indicators$Education==5]="College 1 year to 3 years (Some college or technical school)";heart_disease_indicators$Education[heart_disease_indicators$Education==6]="College 4 years or more (College graduate)"#;heart_disease_indicators$Education[heart_disease_indicators$Education==7]="51-55 years old";heart_disease_indicators$Education[heart_disease_indicators$Education==8]="56-60 years old";heart_disease_indicators$Education[heart_disease_indicators$Education==9]="61-65 years old";heart_disease_indicators$Age[heart_disease_indicators$Age==10]="66-70 years old";heart_disease_indicators$Age[heart_disease_indicators$Age==11]="71-75 years old";heart_disease_indicators$Age[heart_disease_indicators$Age==12]="75-79 years old";heart_disease_indicators$Age[heart_disease_indicators$Age==13]="Over 80 years old";
+heart_disease_indicators$Education=factor(heart_disease_indicators$Education, levels=c("Never attended school or only attended kindergarten", "Grades 1 through 8 (Elementary)","Grades 9 through 11 (Some high school)","Grade 12 or GED (High school graduate)","College 1 year to 3 years (Some college or technical school)","College 4 years or more (College graduate)"))
+
+# Variável 22: Income
+heart_disease_indicators$Income[heart_disease_indicators$Income==1]="Less than $10,000";heart_disease_indicators$Income[heart_disease_indicators$Income==2]="Less than $15,000";heart_disease_indicators$Income[heart_disease_indicators$Income==3]="Less than $20,000";heart_disease_indicators$Income[heart_disease_indicators$Income==4]="Less than $25,000";heart_disease_indicators$Income[heart_disease_indicators$Income==5]="Less than $35,000";heart_disease_indicators$Income[heart_disease_indicators$Income==6]="Less than $50,000";heart_disease_indicators$Income[heart_disease_indicators$Income==7]="Less than $75,000";heart_disease_indicators$Income[heart_disease_indicators$Income==8]="$75,000 or higher"
+income=factor(heart_disease_indicators$Income, levels = c("Less than $10,000", "Less than $15,000", "Less than $20,000", "Less than $25,000","Less than $35,000","Less than $50,000","Less than $75,000","$75,000 or higher"))
+
+```
+
+##  Análise de dados exploratória
+
+Notas:
+-Foi predefinido um conjunto de cores para cada gráfico, como visto no relatório que acompanha este Markdown. Para os casos onde, explicitamente, o número de categorias é superior a 2, ou no caso de a variável x ser o género dos inquiridos, os códigos de cores utilizados encontram-se explicitamente descritos. 
+-O plot pode não ser igual ao demonstrado no relatório, devido a fatores como o tamanho da janela ou pela janela de visualização antes da exportação ser diferente.
+
+
+**Pie charts (vistos no corpo do relatório e no Anexo II, Figura 1, do relatório):**
+
+
+
+```{r Pie charts}
+
+#Heart disease or attack
+hdi_nr=table(heart_disease_indicators$HeartDiseaseorAttack)
+names(hdi_nr)
+percentagens_hdi=round(hdi_nr/sum(hdi_nr)*100, 1)
+rotulos_hdi=paste(names(hdi_nr), percentagens_hdi, "%", sep=" ")
+rotulos_hdi
+cores=c("mistyrose1", "mistyrose4", "mistyrose3")
+par(mar=c(2,0,2,2))
+pie(hdi_nr, labels = c("90.6%", "9.4%"), col = cores, main = "Heart Disease Distribution in Sample", border="white", radius=0.8);legend(x = 0.8, y = 0.9, legend = names(hdi_nr), cex=1,text.width=0.4, fill = cores, title="Heart Disease")
+
+
+# High blood pressure
+hbp_nr=table(heart_disease_indicators$HighBP)
+names(hbp_nr)
+percentagens_hbp=round(hbp_nr/sum(hbp_nr)*100, 1)
+rotulos_hbp=paste(names(hbp_nr), percentagens_hbp, "%", sep=" ")
+rotulos_hbp
+par(mar=c(2,0,2,2))
+pie(hbp_nr, labels = c("57.1%", "42.9%"), col = cores, main = "High Blood Pressure Distribution in Sample", border="white", radius=0.8);legend(x = 0.7, y = 1, legend = names(hbp_nr), cex=0.75,text.width=0.5, fill = cores, title="High Blood Pressure")
+
+
+# High cholesterol
+hchol_nr=table(heart_disease_indicators$HighChol)
+percentagens_hchol=round(hchol_nr/sum(hchol_nr)*100, 1)
+rotulos_hchol=paste(names(hchol_nr), percentagens_hchol, "%", sep=" ")
+rotulos_hchol
+par(mar=c(2,0,2,2))
+pie(hchol_nr, labels = c("57.6%", "42.4%"), col = cores, main = "High Cholestrol Distribution in Sample", border="white", radius=0.8);legend(x = 0.75, y = 1, legend = names(hchol_nr), cex=0.75, text.width=0.5,fill = cores, title="High Cholestrol")
+
+# Cholesterol check
+cholcheck_nr=table(heart_disease_indicators$CholCheck)
+percentagens_cholcheck=round(cholcheck_nr/sum(cholcheck_nr)*100, 1)
+rotulos_cholcheck=paste(names(cholcheck_nr), percentagens_cholcheck, "%", sep=" ")
+rotulos_cholcheck 
+par(mar=c(2,0,2,2))
+pie(cholcheck_nr, labels = c("3.7%", "96.3%"), col = cores, border="white", radius=0.75);title("Cholestrol check within past 5 years in Sample", adj=0.5, line=0.01);legend(x = 0.67, y = -0.55, legend = names(cholcheck_nr), cex=0.9, text.width=0.5, fill = cores, title="Cholestrol Check")
+
+# BMI
+par(mfrow=(c(1,1)))
+bmi_nr=table(heart_disease_indicators$BMI)
+percentagens_bmi=round(bmi_nr/sum(bmi_nr)*100, 1)
+rotulos_bmi=paste(names(bmi_nr), percentagens_bmi, "%", sep=" ")
+rotulos_bmi #no 24.3, yes 75.7
+cores_bmi=c("#858585","#3B2B31","#6A4D58", "#985D6F","#D1B9C4","#EADDE1")
+par(mar=c(3,0,3,3))
+pie(bmi_nr, labels=c("1.2%", "27.2%", "37%","21.1%","8.1%","5.4%"), col = cores_bmi, border="white", radius=0.8);title("BMI Distribution in Population", adj=0.5, line=0.01);legend(x =1.3, y=0.3, legend = names(bmi_nr), cex=0.8, text.width = .6, fill = cores_bmi, title="BMI category")
+
+# Smoker
+smoker_nr=table(heart_disease_indicators$Smoker)
+percentagens_smoker=round(smoker_nr/sum(smoker_nr)*100, 1)
+rotulos_smoker=paste(names(smoker_nr), percentagens_smoker, "%", sep=" ")
+rotulos_smoker
+par(mar=c(2,0,2,2))
+pie(smoker_nr, labels = c("55.7%", "44.3%"), col = cores, border="white", radius=0.8);title("Smoker Distribution in Sample", adj=0.5, line=0.2);legend(x = 0.75, y = -0.45, legend = names(smoker_nr), cex=0.75, text.width=0.5, fill = cores, title="Smoked 100+ cigarettes")
+
+# Stroke
+stroke_nr=table(heart_disease_indicators$Stroke)
+percentagens_stroke=round(stroke_nr/sum(stroke_nr)*100, 1)
+rotulos_stroke=paste(names(stroke_nr), percentagens_stroke, "%", sep=" ")
+rotulos_stroke
+par(mar=c(2,0,2,2))
+pie(stroke_nr, labels = c("95.9%", "4.1%"), col = cores,  border="white", radius=0.8);title("Stroke Distribution in Sample", adj=0.5, line=0.2);legend(x = 0.85, y = 0.9, legend = names(smoker_nr), cex=0.85, text.width=0.3, fill = cores, title="Stroke")
+
+# Diabetes
+diabetes_nr=table(heart_disease_indicators$Diabetes)
+percentagens_diabetes=round(diabetes_nr/sum(diabetes_nr)*100, 1)
+rotulos_diabetes=paste(names(diabetes_nr), percentagens_diabetes, "%", sep=" ")
+rotulos_diabetes
+par(mar=c(2,0,2,2))
+pie(diabetes_nr, labels = c("84.2%", "1.8%", "13.9%"), col = cores, border="white", radius=0.75);title("Diabetes Distribution in Sample", adj=0.5, line=0.2);legend(x = 0.7, y = 0.95, legend = names(diabetes_nr), cex=0.85, text.width=0.5, fill = cores, title="Diabetes Type")
+
+# Physical activity
+physact_nr=table(heart_disease_indicators$PhysActivity)
+percentagens_physact=round(physact_nr/sum(physact_nr)*100, 1)
+rotulos_physact=paste(names(physact_nr), percentagens_physact, "%", sep=" ")
+rotulos_physact
+par(mar=c(2,0,2,2))
+pie(physact_nr, labels = c("24.3%", "75.7%"), col = cores, border="white", radius=0.76);title("Physical Activity Distribution in Sample", adj=0.55, line=0.01);legend(x = 0.75, y = -0.46, legend = names(physact_nr), cex=0.9,text.width=0.5,  fill = cores, title="Physical Activity")
+
+# Fruits
+fruits_nr=table(heart_disease_indicators$Fruits)
+percentagens_fruits=round(fruits_nr/sum(fruits_nr)*100, 1)
+rotulos_fruits=paste(names(fruits_nr), percentagens_fruits, "%", sep=" ")
+rotulos_fruits
+par(mar=c(3,0,3,3))
+pie(fruits_nr, labels = c("36.6%", "63.4%"), col = cores, border="white", radius=0.7);title("Fruit Consumption in Sample", adj=0.5, line=0.01);legend(x = 0.75, y = -0.36, legend = names(physact_nr), cex=0.8,text.width=0.9,  fill = cores, title="Fruit 1+ times per day")
+
+# Veggies
+veggies_nr=table(heart_disease_indicators$Veggies)
+percentagens_veggies=round(veggies_nr/sum(veggies_nr)*100, 1)
+rotulos_veggies=paste(names(veggies_nr), percentagens_veggies, "%", sep=" ")
+rotulos_veggies 
+par(mar=c(3,0,3,3))
+pie(veggies_nr, labels = c("18.9%", "81.1%"), col = cores, border="white", radius=0.7);title("Veggies Consumption in Sample", adj=0.6, line=0.01);legend(x = 0.65, y = -0.36, legend = names(veggies_nr), cex=0.8, text.width=0.9, fill = cores, title="Veggies 1+ Times Per Day")
+
+# Heavy alcohol consumption
+hvyalcohol_nr=table(heart_disease_indicators$HvyAlcoholConsump)
+percentagens_hvyalcohol=round(hvyalcohol_nr/sum(hvyalcohol_nr)*100, 1)
+rotulos_hvyalcohol=paste(names(hvyalcohol_nr), percentagens_hvyalcohol, "%", sep=" ")
+rotulos_hvyalcohol
+par(mar=c(3,0,3,3))
+pie(hvyalcohol_nr, labels = c("94.4%", "5.6%"), col = cores, border="white", radius=0.8);title("Heavy Alcohol Consumption in Sample", adj=0.5, line=0.01);legend(x = 0.65, y = -0.55, legend = names(hvyalcohol_nr), cex=0.77,text.width=0.9,  fill = cores, title="Heavy Alcohol Consumption")
+
+# Any healthcare
+healthcare_nr=table(heart_disease_indicators$AnyHealthcare)
+percentagens_healthcare=round(healthcare_nr/sum(healthcare_nr)*100, 1)
+rotulos_healthcare=paste(names(healthcare_nr), percentagens_healthcare, "%", sep=" ")
+rotulos_healthcare
+par(mar=c(3,0,3,3))
+pie(healthcare_nr, labels = c("4.9%", "95.1%"), col = cores, border="white", radius=0.8);title("Healthcare Access in Sample", adj=0.5, line=0.01);legend(x = 0.8, y = -0.4, legend = names(healthcare_nr), cex=0.8, text.width=0.3, fill = cores, title="Healthcare")
+
+#No Doctor Because of Cost
+nodoc_nr=table(heart_disease_indicators$NoDocbcCost)
+percentagens_nodoc=round(nodoc_nr/sum(nodoc_nr)*100, 1)
+rotulos_nodoc=paste(names(nodoc_nr), percentagens_nodoc, "%", sep=" ")
+rotulos_nodoc
+par(mar=c(3,0,3,3))
+pie(nodoc_nr, labels = c("91.6%", "8.4%"), col = cores, border="white", radius=0.8);title("Doctor Visits in Sample", adj=0.5, line=0.01);legend(x = 0.8, y = -0.4, legend = names(nodoc_nr), cex=0.7, text.width=0.9, fill = cores, title="Can Visit Doctor")
+
+
+# Difficulties walking
+diffwalk_nr=table(heart_disease_indicators$DiffWalk)
+percentagens_diffwalk=round(diffwalk_nr/sum(diffwalk_nr)*100, 1)
+rotulos_diffwalk=paste(names(diffwalk_nr), percentagens_diffwalk, "%", sep=" ")
+rotulos_diffwalk
+par(mar=c(3,0,3,3))
+pie(diffwalk_nr, labels = c("83.2%", "16.8%"), col = cores, border="white", radius=0.8);title("Difficulties Walking Distribution in Sample", adj=0.5, line=0.01);legend(x = 0.75, y = 0.9, legend = names(diffwalk_nr), cex=0.8, text.width=0.9,fill = cores, title="Difficulties Walking")
+
+# Sex
+sex_nr=table(heart_disease_indicators$Sex)
+percentagens_sex=round(sex_nr/sum(sex_nr)*100, 1)
+names(sex_nr)
+rotulos_sex=paste(names(sex_nr), sep=" ", percentagens_sex, "%")
+rotulos_sex
+cores_sex=c("lightpink", "lightblue")
+pie(sex_nr, labels = c("56.0%", "44.0%"), col = cores_sex, border="white", radius=0.7);title("Gender Distribution in Sample", adj=0.6, line=0.01);legend(x = 0.8, y = 0.85, legend = names(sex_nr), cex=0.9, fill = cores_sex, title="Gender Distribution")
+
+# Age Distribution
+par(mfrow=(c(1,1)))
+age_nr=table(heart_disease_indicators$Age)
+percentagens_age=round(age_nr/sum(age_nr)*100, 1)
+rotulos_age=paste(names(age_nr), percentagens_age, "%", sep=" ")
+rotulos_age
+cores_age=c("#464947","#656765", "#858585","#9B9898", "#94898D","#3B2B31","#6A4D58", "#985D6F","#C19AA5","#BCA3AC","#D1B9C4", "#E5CEDC","#EADDE1")
+par(mar=c(3,0,3,3))
+pie(age_nr, labels = c("18-24 years old: 2.2%", "25-30 years old: 3.0%", "31-35 years old: 4.4%", "36-40 years old: 5.4%", "41-45 years old: 6.4%", "46-50 years old: 7.8%", "51-55 years old: 10.4%", "56-60 years old: 12.2%",  "61-65 years old: 13.1%",  "66-70 years old: 12.7%",  "71-75 years old: 9.3%",  "75-79 years old: 6.3%",  "Over 80 years old: 6.8%"), col = cores_age, border="white", radius=0.9);title("Age Distribution in Sample", adj=0.5, line=0.8)
+
+#Education
+edu_nr=table(heart_disease_indicators$Education)
+percentagens_edu=round(edu_nr/sum(edu_nr)*100, 1)
+rotulos_edu=paste(names(edu_nr), percentagens_edu, "%", sep=" ")
+rotulos_edu
+cores_edu=c("#464947","#656765", "#94898D","#3B2B31","#985D6F","#D1B9C4")
+par(mar=c(4,0,4,4))
+pie(edu_nr, labels = c("0.1%","1.6 %","3.7%","24.7%","27.6%", "42.3%"),col = cores_age, border="white", radius=0.75);title("Education Distribution in Sample", adj=0.5, line=0.8);legend(x ="bottomright",horiz=F, legend =c("Never attended school/kindergarten","Elementary","Some high school","High school graduate","Some college or technical school", "College graduate"), cex=0.55, text.width = 1.4, fill = cores_age, title="Age group")
+
+#Income
+income_nr=table(heart_disease_indicators$Income)
+percentagens_inc=round(income_nr/sum(income_nr)*100, 1)
+rotulos_inc=paste(names(income_nr), percentagens_inc, "%", sep=" ")
+rotulos_inc
+cores_inc=c("#464947","#656765", "#94898D","#3B2B31","#6A4D58","#985D6F","#D1B9C4", "#E5CEDC")
+par(mar=c(3,0,2,2));pie(income_nr, labels = c("$75,000 or higher: 35.6%", "Less than $10,000: 3.9%",  "Less than $15,000: 4.6%",  "Less than $20,000: 6.3%",  "Less than $25,000: 7.9%","Less than $35,000: 10.2%", "Less than $50,000: 14.4%", "Less than $75,000: 17.0%"),col = cores_age, border="white", radius=0.75);title("Income Distribution in Sample", adj=0.5, line=0.01)
+
+```
+
+**Gráficos de barras (como no corpo do relatório e no Anexo II, Figura 2, do relatório):**
+
+```{r}
+# Gráficos com 2 variáveis
+
+# Heart Disease or attack + Sex
+ggplot(data=heart_disease_indicators, aes(x=HeartDiseaseorAttack, y=after_stat(count)/sum(after_stat(count)), fill=Sex))+ geom_bar(position="fill") + scale_y_continuous(labels=scales::percent, limits=c(0,1)) + labs (x="Heart Disease", y="Frequency", title="Distribution of Heart Disease Condition by Gender") + scale_fill_manual(values = c("Female" = "lightpink", "Male" = "lightblue"))+theme_bw()+theme(legend.position= "bottom", legend.direction = "horizontal" ,axis.text.x = element_text(size=8), plot.title = element_text(color="black", size=14, face="bold", lineheight = 5,hjust=0.5))
+
+# Heart disease or attack + Age
+ggplot(data=heart_disease_indicators, aes(x=Age, y=after_stat(count)/sum(after_stat(count)), fill=HeartDiseaseorAttack))+ geom_bar(position="fill", width=0.75) + scale_y_continuous(
+  limits=c(0,1)) + labs(x="Age group", y="Frequency", title="Distribution of Heart Disease Condition by Age Group")+ scale_fill_manual(values = c("No"="mistyrose1", "Yes"="mistyrose4"))+theme_bw()+theme(legend.position= "bottom", legend.direction = "horizontal" ,axis.text.x = element_text(size=10), plot.title = element_text(color="black", size=14, face="bold", lineheight = 5, hjust=0.5))+  scale_fill_manual("Patient Answer",values=c("mistyrose1","mistyrose4")) + coord_flip()
+
+# Heart disease or attack + High blood pressure
+ggplot(data=heart_disease_indicators, aes(x=HighBP, y=after_stat(count)/sum(after_stat(count)), fill=HeartDiseaseorAttack))+ geom_bar(position="fill", width=0.75) + scale_y_continuous(
+  limits=c(0,1)) + labs(x="High Blood Pressure", y="Frequency", title="Distribution of Heart Disease Condition by Blood Pressure Levels")+ scale_fill_manual(values = c("No"="mistyrose1", "Yes"="mistyrose4"))+theme_bw()+theme(legend.position= "bottom", legend.direction = "horizontal" ,axis.text.x = element_text(size=10), plot.title = element_text(color="black", size=12, face="bold", lineheight = 5,hjust=0.5))+  scale_fill_manual("Patient Heart Disease",values=c("mistyrose1","mistyrose4"))
+
+# Heart disease or attack + High cholesterol
+ggplot(data=heart_disease_indicators, aes(x=HighChol, y=after_stat(count)/sum(after_stat(count)), fill=HeartDiseaseorAttack))+ geom_bar(position="fill", width=0.75) + scale_y_continuous(
+  limits=c(0,1)) + labs(x="High Cholestrol", y="Frequency", title="Distribution of Heart Disease Condition by Cholestrol Levels")+ scale_fill_manual(values = c("No"="mistyrose1", "Yes"="mistyrose4"))+theme_bw()+theme(legend.position= "bottom", legend.direction = "horizontal" ,axis.text.x = element_text(size=10), plot.title = element_text(color="black", size=12, face="bold", lineheight = 5,hjust=0.5))+  scale_fill_manual("Patient Heart Disease",values=c("mistyrose1","mistyrose4"))
+
+# Heart disease or attack + Smoker
+ggplot(data=heart_disease_indicators, aes(x=Smoker, y=after_stat(count)/sum(after_stat(count)), fill=HeartDiseaseorAttack))+ geom_bar(position="fill", width=0.75) + scale_y_continuous(
+  limits=c(0,1)) + labs(x="Smoker", y="Frequency", title="Distribution of Heart Disease Condition by Smoking Habits")+ scale_fill_manual(values = c("No"="mistyrose1", "Yes"="mistyrose4"))+theme_bw()+theme(legend.position= "bottom", legend.direction = "horizontal" ,axis.text.x = element_text(size=10), plot.title = element_text(color="black", size=12, face="bold", lineheight = 5,hjust=0.5))+  scale_fill_manual("Patient Heart Disease",values=c("mistyrose1","mistyrose4"))
+
+# Heart disease or attack + Diabetes
+ggplot(data=heart_disease_indicators, aes(x=Diabetes, y=after_stat(count)/sum(after_stat(count)), fill=HeartDiseaseorAttack))+ geom_bar(position="fill", width=0.75) + scale_y_continuous(
+  limits=c(0,1)) + labs(x="Diabetes Type", y="Frequency", title="Distribution of Heart Disease Condition by Diabetes")+ scale_fill_manual(values = c("No"="mistyrose1", "Pre-diabetic"="mistyrose3", "Diabetic"="mistyrose4"))+theme_bw()+theme(legend.position= "bottom", legend.direction = "horizontal" ,axis.text.x = element_text(size=10), plot.title = element_text(color="black", size=12, face="bold", lineheight = 5,hjust=0.5))+  scale_fill_manual("Patient Heart Disease",values=c("mistyrose1","mistyrose3", "mistyrose4"))
+
+# Heart disease or attack + Physical activity
+ggplot(data=heart_disease_indicators, aes(x=PhysActivity, y=after_stat(count)/sum(after_stat(count)), fill=HeartDiseaseorAttack))+ geom_bar(position="fill", width=0.75) + scale_y_continuous(
+  limits=c(0,1)) + labs(x="Physical Activity", y="Frequency", title="Distribution of Heart Disease Condition by Physical Activity")+ scale_fill_manual(values = c("No"="mistyrose1", "Yes"="mistyrose4"))+theme_bw()+theme(legend.position= "bottom", legend.direction = "horizontal" ,axis.text.x = element_text(size=10), plot.title = element_text(color="black", size=12, face="bold", lineheight = 5,hjust=0.5))+  scale_fill_manual("Patient Heart Disease",values=c("mistyrose1", "mistyrose4"))
+
+# Heart disease or attack + Alcohol consumption
+ggplot(data=heart_disease_indicators, aes(x=HvyAlcoholConsump, y=after_stat(count)/sum(after_stat(count)), fill=HeartDiseaseorAttack))+ geom_bar(position="fill", width=0.75) + scale_y_continuous(
+  limits=c(0,1)) + labs(x="Heavy Alcohol Consumption", y="Frequency", title="Distribution of Heart Disease Condition by Alcohol Consumption")+ scale_fill_manual(values = c("No"="mistyrose1", "Yes"="mistyrose4"))+theme_bw()+theme(legend.position= "bottom", legend.direction = "horizontal" ,axis.text.x = element_text(size=10), plot.title = element_text(color="black", size=12, face="bold", lineheight = 5,hjust=0.5))+  scale_fill_manual("Patient Heart Disease",values=c("mistyrose1", "mistyrose4"))
+
+#Heart disease or attack + Healthcare
+ggplot(data=heart_disease_indicators, aes(x=AnyHealthcare, y=after_stat(count)/sum(after_stat(count)), fill=HeartDiseaseorAttack))+ geom_bar(position="fill", width=0.75) + scale_y_continuous(
+  limits=c(0,1)) + labs(x="Healthcare Adhesion", y="Frequency", title="Distribution of Heart Disease Condition by Heathcare")+ scale_fill_manual(values = c("No"="mistyrose1", "Yes"="mistyrose4"))+theme_bw()+theme(legend.position= "bottom", legend.direction = "horizontal" ,axis.text.x = element_text(size=10), plot.title = element_text(color="black", size=12, face="bold", lineheight = 5,hjust=0.5))+  scale_fill_manual("Patient Heart Disease",values=c("mistyrose1", "mistyrose4"))
+
+#Heart disease or attack+ Doctor affordability
+ggplot(data=heart_disease_indicators, aes(x=NoDocbcCost, y=after_stat(count)/sum(after_stat(count)), fill=HeartDiseaseorAttack))+ geom_bar(position="fill", width=0.75) + scale_y_continuous(
+  limits=c(0,1)) + labs(x="Pays for Doctor", y="Frequency", title="Distribution of Heart Disease Condition by Doctor Affordabilty")+ scale_fill_manual(values = c("No"="mistyrose1", "Yes"="mistyrose4"))+theme_bw()+theme(legend.position= "bottom", legend.direction = "horizontal" ,axis.text.x = element_text(size=10), plot.title = element_text(color="black", size=12, face="bold", lineheight = 5,hjust=0.5))+  scale_fill_manual("Patient Heart Disease",values=c("mistyrose1", "mistyrose4"))
+
+#Heart disease or attack + Income
+ggplot(data=heart_disease_indicators, aes(x=Income, y=after_stat(count)/sum(after_stat(count)), fill=HeartDiseaseorAttack))+ geom_bar(position="fill", width=0.75) + scale_y_continuous(
+  limits=c(0,1)) + labs(x="Income", y="Frequency", title="Distribution of Income Group in Sample by Heart Disease Risk")+ scale_fill_manual(values = c("No"="mistyrose1", "Yes"="mistyrose4"))+theme_bw()+theme(legend.position= "bottom", legend.direction = "horizontal" ,axis.text.x = element_text(size=10), plot.title = element_text(color="black", size=12, face="bold", lineheight = 5,hjust=0.5))+  scale_fill_manual("Patient Heart Disease",values=c("mistyrose1", "mistyrose4")) + coord_flip()
+
+
+# Healthcare access + diabetes
+ggplot(data=heart_disease_indicators, aes(x=Diabetes, y=after_stat(count)/sum(after_stat(count)), fill=AnyHealthcare))+ geom_bar(position="fill", width=0.75) + scale_y_continuous(
+  limits=c(0,1)) + labs(x="Diabetes", y="Frequency", title="Distribution of Diabetes in Sample by Healthcare Access")+ scale_fill_manual(values = c("No"="mistyrose1", "Pre-diabetic"="mistyrose3", "Diabetic"="mistyrose4"))+theme_bw()+theme(legend.position= "bottom", legend.direction = "horizontal" ,axis.text.x = element_text(size=10), plot.title = element_text(color="black", size=12, face="bold", lineheight = 5,hjust=0.5))+  scale_fill_manual("Patient Access to Healthcare",values=c("mistyrose1","mistyrose3", "mistyrose4"))+ coord_flip()
+
+# Doctor visits + diabetes
+ggplot(data=heart_disease_indicators, aes(x=Diabetes, y=after_stat(count)/sum(after_stat(count)), fill= NoDocbcCost))+ geom_bar(position="fill", width=0.75) + scale_y_continuous(
+  limits=c(0,1)) + labs(x="Diabetes", y="Frequency", title="Distribution of Diabetes in Sample by Doctor Affordability")+ scale_fill_manual(values = c("No"="mistyrose1", "Pre-diabetic"="mistyrose3", "Diabetic"="mistyrose4"))+theme_bw()+theme(legend.position= "bottom", legend.direction = "horizontal" ,axis.text.x = element_text(size=10), plot.title = element_text(color="black", size=12, face="bold", lineheight = 5,hjust=0.5))+  scale_fill_manual("Patient Visits to Doctor",values=c("mistyrose1","mistyrose3", "mistyrose4"))+ coord_flip()
+
+# Heart disease or attack + education status
+ggplot(data=heart_disease_indicators, aes(x=Education, y=after_stat(count)/sum(after_stat(count)), fill= HeartDiseaseorAttack))+ geom_bar(position="fill", width=0.75) + scale_y_continuous(
+  limits=c(0,1)) + labs(x="Education", y="Frequency", title="Distribution of Education Group in Sample by Heart Disease Risk")+ scale_fill_manual(values = c("No"="mistyrose1", "Yes"="mistyrose4"))+theme_bw()+theme(legend.position= "bottom", legend.direction = "horizontal" ,axis.text.x = element_text(size=10), plot.title = element_text(color="black", size=12, face="bold", lineheight = 5,hjust=0.5))+  scale_fill_manual("Heart Disease Risk",values=c("mistyrose1","mistyrose3", "mistyrose4"))+ coord_flip()
+
+# Heart disease or attack + income
+ggplot(data=heart_disease_indicators, aes(x=BMI, y=after_stat(count)/sum(after_stat(count)), fill= HeartDiseaseorAttack))+ geom_bar(position="fill", width=0.75) + scale_y_continuous(
+  limits=c(0,1)) + labs(x="BMI group", y="Frequency", title="Distribution of BMI Group in Sample by Heart Disease Risk")+ scale_fill_manual(values = c("No"="mistyrose1", "Yes"="mistyrose4"))+theme_bw()+theme(legend.position= "bottom", legend.direction = "horizontal" ,axis.text.x = element_text(size=10), plot.title = element_text(color="black", size=12, face="bold", lineheight = 5,hjust=0.5))+  scale_fill_manual("Heart Disease Risk",values=c("mistyrose1","mistyrose3", "mistyrose4"))+ coord_flip()
+```
+
+**Density plot**
+-Para analisar a distribuição do BMI, recorremos à feitura de um density plot com os valores numéricos (ou seja, da base de dados que foi importada).
+```{r}
+ggplot(data=heart_disease_health_indicators_BRFSS2015,aes(x=BMI))+
+  labs(x="BMI", y= "Density", title="BMI Distribution in Sample")+
+  geom_density(fill="mistyrose",
+               color="snow4", linewidth=0.5, bw=0.5)+
+  geom_density(color="black",linewidth=1,bw=10) + xlim(0,100)
+```
+
+
+## Regressão logística
+
+Notas:
+-Este modelo serviu apenas como um teste, pelo que a regressão logística não foi muito aprofundada, pelo que declaramos que uma análise mais profunda (i.e.: ROC curve) se encontraria fora do âmbito deste trabalho.
+-Os gráficos que a regressão linear produz podem ser (muito) demorados a processarem.
+
+```{r Regressão logística}
+
+#criação do conjunto de treino
+Treino1 <- createDataPartition(heart_disease_indicators$HeartDiseaseorAttack, times=1, p=0.7, list=F)
+dim(Treino1)
+training <- heart_disease_indicators[Treino1,]
+testing <- heart_disease_indicators[-Treino1,]
+
+model_fit <- train(HeartDiseaseorAttack ~ .,  data=training, method="glm", family="binomial")
+predict(model_fit, newdata=testing)
+
+#criação dos dois modelos
+model_fit_one <- glm(HeartDiseaseorAttack ~ ., data=training, family="binomial")
+model_fit_two <- glm(HeartDiseaseorAttack ~ HighBP+HighChol+CholCheck+Smoker+Stroke+Diabetes+HvyAlcoholConsump+NoDocbcCost+GenHlth+MentHlth+DiffWalk+Sex+Age+Income, data=training, family="binomial")
+```
+
+Geralmente, a remoção de variáveis de predição de um modelo vai quase sempre fazê-lo não ter um enquadramento tão bom, mas há sempre a necessidade de testar se tal acontece.
+Para tal, usamos uma análise de Anova com um teste de chi-quadrado (devido à dimensão muito grande do conjunto de treino).
+Se o p-value for inferior a 0.05, podemos rejeitar a hipótese nula, que daria evidências a favor do modelo menos reduzido.
+
+```{r - ANOVA}
+anova(model_fit_one, model_fit_two, test="Chisq")
+#p-value: 0.0002121 - rejeita-se a hipótese nula - vamos usar o model fit normal, visto que o reduzido (model fit two) é "rejeitado".
+```
+
+A seguir, criamos a previsão dos dados usando os "fitted values" - isto é, a aproximação da variável x à reta que melhor enquadra od pontos traçados pelo modelo de treino. De modo a avaliar a validação dos dados, procedemos à feitura de uma Confusion Matrix.
+
+``` {r - Previsão de dados}
+predicted.data.modelfitone <- data.frame(probability.of.hd.mfone=model_fit_one$fitted.values, CVD=training$HeartDiseaseorAttack)
+predicted.data.modelfitone <- predicted.data.modelfitone[order(predicted.data.modelfitone$probability.of.hd.mfone, decreasing = F),]
+predicted.data.modelfitone$rank <- 1:nrow(predicted.data.modelfitone)
+View(predicted.data.modelfitone)
+
+#Regressão logística segundo o conjunto de treino:
+ggplot(data=predicted.data.modelfitone, aes(x=rank, y=probability.of.hd.mfone)) + geom_point(aes(color=CVD), alpha=0.3, shape=4,stroke=1.1)+ xlab("Rank of Patient Number")+ylab("Predicted probability of getting heart disease") + ggtitle("Train")
+
+#Confusion Matrix
+pred = predict(model_fit, newdata=training)
+confusionMatrix(data=pred, training$HeartDiseaseorAttack)
+
+```
+
+Tendo com conta os valores obtidos, embora a balanced accuracy seja baixa (0.5573), e induza num valor relativamente alto de false negatives, decidimos que o threshold serviria num caso de análise exploratória de dados.
+
+```{r - Teste}
+
+#Regressão logística com o conjunto de teste:
+
+model_fit_test <- glm(HeartDiseaseorAttack ~ ., data=testing, family="binomial")
+predicted.data.test <- data.frame(probability.of.hd.test=model_fit_test$fitted.values, CVD=testing$HeartDiseaseorAttack)
+predicted.data.test <- predicted.data.test[order(predicted.data.test$probability.of.hd.test, decreasing = F),]
+predicted.data.test$rank <- 1:nrow(predicted.data.test)
+View(predicted.data.test)
+
+ggplot(data=predicted.data.test, aes(x=rank, y=probability.of.hd.test)) + geom_point(aes(color=CVD), alpha=0.3, shape=4,stroke=1.1) + labs(x="Index of Patient Number",y="Predicted probability of getting heart disease", title ="Predicted probability of CVD")+theme(legend.position= "bottom", legend.direction = "horizontal" , axis.text.x = element_text(size=10), plot.title = element_text(color="black", size=14, face="bold", lineheight = 5,hjust=0.5))
+
+```
