@@ -1,0 +1,1029 @@
+---
+title: "Differential gene expression analysis with DESeq2"
+subtitle: "Part I - Analysis of RNA-seq data from drug-treated cancer cells"
+author: "Jorge Cabral (adapted from Andreia Reis, Margarida Ferreira and Rita Guimarães)"
+date: "May 30, 2025"
+output:
+  html_document:
+    html_document:
+    number_sections: FALSE
+    df_print: paged
+    code_folding: show
+#    theme: journal
+#    highlight: espresso
+    toc: yes
+    toc_float: yes
+    toc_depth: 6
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      error = FALSE,
+                      warning = FALSE)
+```
+
+## Background
+
+The study from the paper [“The transcriptomic response of cells to a drug combination is more than the sum of the responses to the monotherapies”](https://doi.org/10.7554/eLife.52707){target="_blank"} explores how the transcriptional responses of single drug treatments compare to their combinations in breast (MCF7) and in prostate (LNCaP) cancer cell lines, over time. Understanding these responses is crucial for advancing our knowledge of effective drug combinations and their mechanisms of action. As the authors state “our ability to discover effective drug combinations is limited, in part by insufficient understanding of how the transcriptional response of two monotherapies results in that of their combination”.
+
+![](study.png)
+
+Understanding the transcriptional responses to drug treatments is fundamental in biomedical research, particularly in the development of effective therapies. This project will equip you with hands-on experience in RNA-seq data processing and analysis, preparing you for future research in clinical bioinformatics.
+
+## Project objectives
+
+Perform a comprehensive differential gene expression analysis on RNA-seq data retrieved from ENA (European Nucleotide Archive), focusing on the transcriptional response of cancer cells to various drug treatments.
+
+Process RNA-seq fastq data:
+
+-   Data was retrieved from the project [PRJNA628675](https://www.ebi.ac.uk/ena/browser/view/PRJNA628675){target="_blank"} deposited in ENA .
+
+-   Quality control of raw data and after trimming.
+
+-   Read alignment with STAR and evaluation of library strandness.
+
+-   Transcript assembly and quantification of gene expression with StringTie.
+
+Differential gene expression analysis :
+
+-   identify deferentially expressed genes between treated and control samples across different time points.
+
+## Group assignments and data sets
+
+Each group will have a specific treatment at three time points (0, 9 and 24 hours) for the MCF7 breast cancer cell line. Ultimately you will present your findings through a report and a presentation.
+
+-   Group 1 → MCF7 cells treated with Tamoxifen (T)
+
+-   Group 2 → MCF7 cells treated with Mefloquine (M) – 3 time-points
+
+-   Group 3 → MCF7 cells treated with Tamoxifen and Mefloquine (TM) – 3 time-points
+
+-   Group 4 → MCF7 cells treated with Tamoxifen and Withaferin A (TW) – 3 time-points
+
+-   Group 5 → MCF7 cells treated with Mefloquine and Withaferin A (MW) – 3 time-points
+
+**Samples:** ![](samples.png)
+
+## Tools
+
+The pipeline below uses the Bioconductor package `DESeq2` for the differential expression analysis and is essentially based on the following tutorials and documentation:
+
+-   <https://github.com/hbctraining/DGE_workshop/tree/master/lessons>
+-   <http://bioconductor.org/packages/release/bioc/vignettes/DESeq2/inst/doc/DESeq2.html>
+-   <https://bioconductor.org/packages/release/workflows/vignettes/rnaseqGene/inst/doc/rnaseqGene.html>
+-   <http://www.nathalievialaneix.eu/doc/pdf/tutorial-rnaseq.pdf>
+
+`DESeq2` citation:
+
+```{r citation DESeq, echo = TRUE}
+citation("DESeq2")
+```
+
+> A basic task in the analysis of count data from RNA-seq is the detection of differentially expressed genes. The count data are presented as a table which reports, for each sample, the number of sequence fragments that have been assigned to each gene. Analogous data also arise for other assay types, including comparative ChIP-Seq, HiC, shRNA screening, and mass spectrometry. An important analysis question is the quantification and statistical inference of systematic changes between conditions, as compared to within-condition variability. The package DESeq2 provides methods to test for differential expression by use of negative binomial generalized linear models; the estimates of dispersion and logarithmic fold changes incorporate data-driven prior distributions. --- Michael I. Love, Simon Anders, and Wolfgang Huber
+
+## Loading packages
+
+Load the necessary packages for the analysis.
+
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+#install.packages("BiocManager")
+library(BiocManager)
+#install.packages("devtools")
+library(devtools)
+
+library(ggplot2)
+library(DT)
+library(hexbin)
+#BiocManager::install("DESeq2")
+library(DESeq2)
+library(dplyr)
+library(factoextra)
+library(RColorBrewer)
+library(pheatmap)
+#BiocManager::install("vsn")
+library(vsn)
+#BiocManager::install("phyloseq")
+#BiocManager::install("genefilter")
+#BiocManager::install("biomformat")
+#install_github('twbattaglia/btools')
+library(btools)
+#install_github("dleelab/leedonghyung")
+library(leedonghyung)
+library(data.table)
+library(plotly)
+library(ggrepel)
+library(Seurat)
+library(VennDiagram)
+library(reshape2)
+library(heatmaply)
+```
+
+## Preparing the data set
+
+Creating new directories for the output.
+
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+
+if (!dir.exists(file.path(getwd(), "results"))) {
+  dir.create(file.path(getwd(), "results"))
+}
+
+```
+
+### Loading
+
+As input, the `DESeq2` package expects count data in the form of a matrix of integer values. In this matrix, each row represents a gene, each column refers to a sequenced RNA library, and the values give the estimated fragment (a read-pair, hence referred to just as "read") counts assigned to the respective gene by the quantification tool.
+
+We can read in the count matrix, `cts`, and the sample information table, `coldata`, as follows:
+
+```{r }
+coldata <- read.delim("sample_info.txt", sep = "\t")
+```
+
+```{r, echo = FALSE}
+datatable(
+  coldata,
+  options = list(
+    lengthChange = TRUE,
+    scrollX = TRUE,
+    pageLength = 5,
+    lengthMenu = c(5, 10, 15, 20),
+    keys = TRUE,
+    dom = 'Blfrtip',
+    buttons = list(
+      'copy',
+      'print',
+      list(
+        extend = 'collection',
+        buttons = c('csv', 'excel', 'pdf'),
+        text = 'Download'
+      )
+    )
+  ),
+  autoHideNavigation = FALSE,
+  filter = "top",
+  extensions = c('Buttons', 'KeyTable'),
+  rownames = TRUE
+)
+```
+
+We will now rename the rows and remove unnecessary columns from `coldata`:
+
+```{r }
+row.names(coldata) <- coldata[, 1]
+coldata <- coldata[, c(-1)]
+```
+
+```{r, echo = FALSE}
+# Change for each group
+group = 5
+coldata <- coldata[c(1:9,(9*group+1):(9*group+9)), ] 
+```
+
+```{r, echo = FALSE}
+datatable(
+  coldata,
+  options = list(
+    lengthChange = TRUE,
+    scrollX = TRUE,
+    pageLength = 5,
+    lengthMenu = c(5, 10, 15, 20),
+    keys = TRUE,
+    dom = 'Blfrtip',
+    buttons = list(
+      'copy',
+      'print',
+      list(
+        extend = 'collection',
+        buttons = c('csv', 'excel', 'pdf'),
+        text = 'Download'
+      )
+    )
+  ),
+  autoHideNavigation = FALSE,
+  filter = "top",
+  extensions = c('Buttons', 'KeyTable'),
+  rownames = TRUE
+)
+```
+
+```{r}
+cts <- read.csv("transcript_count_matrix.csv",
+                  row.names = 1)
+```
+
+```{r, echo = FALSE}
+## Do not use datatable() with all the rows in cts because it is a large memory object
+datatable(
+  cts[1:6, ],
+  options = list(
+    lengthChange = TRUE,
+    scrollX = TRUE,
+    pageLength = 5,
+    lengthMenu = c(5, 10, 15, 20),
+    keys = TRUE,
+    dom = 'Blfrtip',
+    buttons = list(
+      'copy',
+      'print',
+      list(
+        extend = 'collection',
+        buttons = c('csv', 'excel', 'pdf'),
+        text = 'Download'
+      )
+    )
+  ),
+  autoHideNavigation = FALSE,
+  filter = "top",
+  extensions = c('Buttons', 'KeyTable'),
+  rownames = TRUE
+)
+```
+
+Next we will load the gene annotation and merge it with `cts`.
+
+```{r}
+annot <- read.delim("transcripts_annot.txt")
+```
+
+```{r, echo = FALSE}
+datatable(
+  annot[1:6, ],
+  options = list(
+    lengthChange = TRUE,
+    scrollX = TRUE,
+    pageLength = 5,
+    lengthMenu = c(5, 10, 15, 20),
+    keys = TRUE,
+    dom = 'Blfrtip',
+    buttons = list(
+      'copy',
+      'print',
+      list(
+        extend = 'collection',
+        buttons = c('csv', 'excel', 'pdf'),
+        text = 'Download'
+      )
+    )
+  ),
+  autoHideNavigation = FALSE,
+  filter = "top",
+  extensions = c('Buttons', 'KeyTable'),
+  rownames = TRUE
+)
+```
+
+```{r}
+annot$new <- paste0(annot$transcript_id,
+                    "|",
+                    annot$gene_name)
+
+cts <- merge(annot,
+             cts,
+             by.x = "transcript_id",
+             by.y = 0,
+             all.y = FALSE)
+
+row.names(cts) <- cts[, 3]
+
+cts <- cts[, -c(1, 2, 3)]
+
+colnames(cts) <- gsub(".gtf_", "\\1", colnames(cts)) # Careful, check names
+
+cts <- cts[,colnames(cts) %in% row.names(coldata)]
+```
+
+```{r, echo = FALSE}
+datatable(
+  cts[1:6, ],
+  options = list(
+    lengthChange = TRUE,
+    scrollX = TRUE,
+    pageLength = 5,
+    lengthMenu = c(5, 10, 15, 20),
+    keys = TRUE,
+    dom = 'Blfrtip',
+    buttons = list(
+      'copy',
+      'print',
+      list(
+        extend = 'collection',
+        buttons = c('csv', 'excel', 'pdf'),
+        text = 'Download'
+      )
+    )
+  ),
+  autoHideNavigation = FALSE,
+  filter = "top",
+  extensions = c('Buttons', 'KeyTable'),
+  rownames = TRUE
+)
+```
+
+```{r, echo = FALSE}
+## remove unnecessary objects
+rm(annot)
+```
+
+### Filtering
+
+```{r echo=TRUE}
+low_coverage_cut <- 4000000
+```
+
+The next step involves removing low-coverage samples. In order to do so, we will identify and exclude all samples with less than \* `r low_coverage_cut` \* uniquely mapped reads. First, it's better to make sure we can keep track on the samples we're about to remove:
+
+```{r low-coverage sample removal}
+
+sort(colSums(cts))
+
+low_coverage <- cts[, colSums(cts) < low_coverage_cut] # the threshold can be changed
+```
+
+We found `r ncol(low_coverage)` samples with less than `r low_coverage_cut` uniquely mapped reads
+
+Then, if necessary, let's effectively remove them from the count matrix, `cts`:
+
+```{r}
+if (ncol(low_coverage) !=0) {
+  remove <- colnames(low_coverage)
+  cts <- cts[, !colnames(cts) %in% remove]
+} 
+```
+
+Finally, if necessary, let's remove those entries from the sample information table:
+
+```{r}
+if (ncol(low_coverage) !=0) {
+coldata <- coldata[!rownames(coldata) %in% remove,]
+}
+```
+
+In our table `counts` we have `r nrow(cts)` genes and `r ncol(cts)` samples. In our metadata table we have `r nrow(coldata)` samples and `r ncol(coldata)` phenotypes.
+
+### Removing the null/0 counts + counts in only one sample
+
+```{r echo=TRUE}
+low_count_cut <- 0
+```
+
+While it is not mandatory to remove low count genes before running the `DESeq2` functions, by removing rows in which there are very few reads, we reduce the memory size of data objects and we increase the speed of the transformation and testing functions within `DESeq2`. In this case we will `r if (low_count_cut == 0) paste("not remove low count genes") else paste("remove genes with counts lower than", low_count_cut)`.
+
+```{r }
+##filtering counts 
+
+cts <- cts[rowSums(cts) > low_count_cut, ] # the threshold can be changed
+```
+
+In your table counts (after filtering the gene counts) you have `r nrow(cts)` genes and `r ncol(cts)` samples.
+
+```{r }
+##filter counts in only one sample
+
+cts <- cts[rowSums(cts) != apply(cts, 1, max), ]
+```
+
+In your table counts (after filtering the genes with counts in only one sample) you have `r nrow(cts)` genes and `r ncol(cts)` samples.
+
+### Ordering
+
+Another absolutely critical aspect is that the columns of the count matrix (`cts`) and the rows of the column data (`coldata`) are in the same order so that `DESeq2` can easily establish a correspondence between the counts and sample specific information. Let us first order the columns in `cts`:
+
+```{r order match}
+cts <- cts[, order(colnames(cts), decreasing = FALSE)]
+```
+
+Now let us order the rows in `coldata`:
+
+```{r}
+coldata <- coldata[order(rownames(coldata), decreasing = FALSE), ]
+```
+
+Finally, we will confirm the ordering. This can be checked in a two-step fashion: First we confirm that `coldata` has information about all the samples present in `cts`. If the case, returns `TRUE`.
+
+```{r order check}
+all(rownames(coldata) %in% colnames(cts))
+```
+
+Then we can check if the order is exactly equal. If the case, returns `TRUE`.
+
+```{r}
+all(rownames(coldata) == colnames(cts))
+```
+
+### DESeqDataSet object
+
+The object class used by the `DESeq2` package to store the read counts and the intermediate estimated quantities during statistical analysis is the `DESeqDataSet`. This object describes the experiment and, as such, also comprises an associated design formula that tells which columns in the sample information table specify the experimental design and how these factors should be used in the analysis.
+
+From now on, the `DESeqDataSet` will be represented as `dds`. First we will categorize data and store it as a factor
+
+```{r }
+
+treatment <- unique(coldata[[1]])
+col.plot <- brewer.pal(8, "Dark2")[1:length(treatment)] # the palette can be changed
+names(col.plot) <- treatment
+col.plot.data <- col.plot[as.vector(coldata[[1]])]
+
+variable_of_interest <- 3 # the Treatment_TimePoint column on the object coldata.
+                          # Check if it is necessary to change
+
+################################################################
+#####   Careful with the next step. Depends on the group!  #####
+################################################################
+
+coldata[,variable_of_interest] <- factor(coldata[,variable_of_interest],
+                                         levels = c("DMSO_0",
+                                                    "DMSO_9",
+                                                    "DMSO_24",
+                                                    "MW_0",
+                                                    "MW_9",
+                                                    "MW_24"))
+
+################################################################
+```
+
+By default, R will choose a reference level (the level we want to compare against; the level of the "control" group) for factors based on alphabetical order. *We change our reference subject to our objective*.
+
+#### Comparison
+
+```{r}
+reference <- 
+  levels(coldata[,variable_of_interest])[4] ## Can be changed for different comparisons
+
+experimental <-
+  levels(coldata[,variable_of_interest])[6] ## Cn be changed for different comparisons
+
+coldata[,variable_of_interest] <- relevel(coldata[,variable_of_interest], reference)
+
+```
+
+and then create the `dds` object specifying the design (the variable of interest should be at the end of the `formula`).
+
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+dds <-
+  DESeqDataSetFromMatrix(countData = cts,
+                         colData = coldata,
+                         design = 
+                           formula(
+                             paste0("~",
+                                    colnames(coldata)[variable_of_interest])))
+```
+
+```{r, echo = FALSE}
+#assay(): allows to access the data from the DESeqDataSet
+datatable(
+  assay(dds)[1:6, ],
+  options = list(
+    lengthChange = TRUE,
+    scrollX = TRUE,
+    pageLength = 5,
+    lengthMenu = c(5, 10, 15, 20),
+    keys = TRUE,
+    dom = 'Blfrtip',
+    buttons = list(
+      'copy',
+      'print',
+      list(
+        extend = 'collection',
+        buttons = c('csv', 'excel', 'pdf'),
+        text = 'Download'
+      )
+    )
+  ),
+  autoHideNavigation = FALSE,
+  filter = "top",
+  extensions = c('Buttons', 'KeyTable'),
+  rownames = TRUE
+  )
+```
+
+From this point on, there are two separate paths in this workflow: the first path presented involves transformations of the counts in order to visually explore sample relationships; in the second path, we will go back to the original raw counts for statistical testing, a critical step because the statistical testing methods rely on original count data (not scaled or transformed) for calculating the precision of measurements.
+
+## Exploratory analysis and visualization
+
+### The variance stabilizing transformation (VST) and the rlog
+
+In order to test for differential expression, `DESeq2` operates on raw counts and use discrete distributions (described in more detail later on). However for visualization purposes it might be useful to work with transformed versions of the count data. In fact, *principal components analysis* (PCA) and clustering methods work best for data with, generally, the same range of variance at different ranges of the mean values. This type of data is said to be *homoscedastic*. Let us first visualize the distribution of the counts in each sample
+
+```{r, fig.width = 9,fig.height = 6,class.source = 'fold-hide'}
+par(mar = c(6,3,3,1))
+boxplot(
+  counts(dds),
+  ylim = c(0, max(counts(dds)*1.2)),
+  cex.axis = 0.8,
+  las = 3,
+  col = col.plot.data,
+  outline = T,
+  outpch = 21,
+  outbg = col.plot.data,
+  whisklty = 1,
+  boxlty = 0,
+  cex.lab = 1.2
+)
+legend(
+  "topright",
+  treatment,
+  fill = unique(col.plot.data),
+  bty = "n",
+  title = "",
+  cex = 0.8
+)
+mtext(
+  side = 2,
+  text = "Counts",
+  line = 2,
+  cex = 1
+)
+title(
+  "Raw",
+  adj = 0,
+  line = 1
+)
+
+```
+
+So, is RNA-Seq count data homo- or heteroscedastic? Let's see how standard deviations and means for the genes in our `cts` matrix relate to each other.
+
+```{r,class.source = 'fold-hide'}
+
+df_mean_variance <-
+  data.frame(mean = apply(cts, 1, mean),
+             variance = apply(cts, 1, var),
+             counts = apply(cts, 1, sum))
+```
+
+```{r, fig.width = 9,fig.height = 4,class.source = 'fold-hide'}
+
+ggplot(df_mean_variance) +
+  geom_point(aes(x = mean,
+                 y = variance,
+                 fill = counts,
+                 color = counts),
+             size = .5) + 
+  geom_line(aes(x = mean,
+                y = mean),
+                color="red") +
+  scale_y_log10() +
+  scale_x_log10() 
+
+```
+
+The plot above shows that the variance across samples is not constant, therefore the data is heteroscedastic. Also, variance tends to be greater than the mean (depicted by the red line).
+
+We are now aware that for RNA-seq counts the expected variance grows with the mean. If one performs PCA directly on a matrix of counts, the resulting plot typically depends mostly on the genes with highest counts because they show the largest absolute differences between samples. To overcome this obstacle, a simple strategy is to take the *logarithm of the normalized count values* plus a **pseudocount** to avoid infinite values in the cases of zero counts; however, the logarithm with a small **pseudocount** amplifies differences when the values are close to 0 and the low count genes will overly contribute to sample-sample distances and PCA plots.
+
+For that reason, the authors of `DESeq2` suggest *two other transformations for count data* that stabilize the variance across the mean: the variance stabilizing transformation (VST) for negative binomial data with a dispersion-mean trend, and the regularized-logarithm transformation or rlog, implemented in the `vst()` and `rlog()` functions, respectively. For genes with high counts, both transformations will perform similarly to the common `log2` transformation of normalized counts. For genes with lower counts, however, the values are shrunken towards a middle value. The VST or rlog-transformed data then become **approximately homoscedastic**, and can be used directly for computing distances between samples or as input to downstream methods which perform best with homoscedastic data.
+
+Note that the VST is much faster to compute and is less sensitive to high count outliers.
+
+```{r vst transformation}
+vsd <- vst(dds, blind = FALSE)
+```
+
+```{r rlog transformation, warning=FALSE, message=FALSE}
+## Carefull: Time consuming ##
+rld <- rlog(dds, blind = FALSE)
+```
+
+```{r log2 transformation, warning=FALSE, message=FALSE}
+# this gives log2(n + 1) with normalization of the counts
+ntd <- normTransform(dds)
+```
+
+The figures below plot the standard deviation of the transformed data, across samples, against the mean, using the shifted logarithm transformation, the regularized log transformation and the variance stabilizing transformation.
+
+```{r transformation effect visualization,class.source = 'fold-hide'}
+vsn::meanSdPlot(assay(ntd))
+vsn::meanSdPlot(assay(rld))
+vsn::meanSdPlot(assay(vsd))
+```
+
+```{r, class.source = 'fold-hide' }
+df_boxplot <- list(counts(dds),assay(ntd), assay(vsd), assay(rld))
+df_boxplot_title <- c("raw","normTransform", "vst", "rlog")
+
+df_boxplot_text <- c("raw","Log2(normalized count + 1)", "vst", "rlog")
+```
+
+```{r, fig.width = 9,fig.height = 9,class.source = 'fold-hide'}
+par(mfrow = c(2,2),
+    mar = c(6,3,3,1))
+
+for (i in 1:length(df_boxplot)) {
+boxplot(
+  as.data.frame(df_boxplot[[i]]),
+  ylim = c(0, max(df_boxplot[[i]]*1.2)),
+  cex.axis = 0.8,
+  las = 2,
+  col = col.plot.data,
+  outline = T,
+  outpch = 21,
+  outbg = col.plot.data,
+  whisklty = 1,
+  boxlty = 0,
+  cex.lab = 1.2
+)
+legend(
+  "topright",
+  treatment,
+  fill = unique(col.plot.data),
+  bty = "n",
+  title = "",
+  cex = 0.8
+)
+mtext(
+  side = 2,
+  text = df_boxplot_title[i],
+  line = 2,
+  cex = 1
+)
+title(
+  df_boxplot_text[i],
+  adj = 0,
+  line = 1
+)
+}
+```
+
+### Sample-to-sample distances
+
+A useful first step in an RNA-seq analysis is often to assess overall similarity between samples: Which samples are similar to each other, which are different? Does this fit to the expectation from the experiment’s design?
+
+#### Hierarchical clustering
+
+We will use the function `dist()` to calculate the "Euclidean distance" between samples, i.e, the square root of the sum of the squared differences between values for the items. In simpler words, "Euclidean distance" refers to the straight-line distance between two points.
+
+```{r,fig.width = 9,fig.height = 6, warning = FALSE, message = FALSE, error = FALSE}
+
+sampleDists <- stats::dist(t(assay(vsd)), method = "euclidean") # the transformation used can be changed. The method = "euclidean" can be changed
+
+sampleDistMatrix <- as.matrix(sampleDists)
+rownames(sampleDistMatrix) <- colnames(vsd)
+colnames(sampleDistMatrix) <- colnames(vsd)
+```
+
+```{r,fig.width = 9,fig.height = 6, warning = FALSE, message = FALSE, error = FALSE,class.source = 'fold-hide'}
+pheatmap(
+  sampleDistMatrix,
+  annotation_row = as.data.frame(coldata[, c(2, 3)]),
+  clustering_distance_rows = sampleDists,
+  clustering_distance_cols = sampleDists,
+  col = colorRampPalette(rev(brewer.pal(9, "Spectral")))(255), # palette can be changed
+  fontsize_row = 10
+)
+```
+
+#### Principal components analysis (PCA)
+
+Another way of visualizing sample-to-sample distances is by performing a PCA. In this method, the samples are projected onto a 2D or 3D hyperplane such that they spread out in the 2 or 3 directions that explain most of the differences. The x-axis represents the direction that segregates the samples the most (PC1). The y-axis is the direction that separates the data the second most (PC2). The z-axis is the direction that separates the data the third most (PC3).
+
+```{r, warning=FALSE,class.source = 'fold-hide'}
+
+# the transformation used can be changed.
+
+ggplotly(
+  plotPCA(vsd, intgroup = colnames(coldata)[1]) + # the intgroup used can be changed. 
+    theme_minimal() +
+    geom_vline(xintercept = 0) +
+    geom_hline(yintercept = 0) +
+    scale_color_manual(values = col.plot) + # change
+    labs(color = "Treatment") +  # change
+    geom_text(
+      aes(label = colnames(vsd)),
+      position = position_jitter(0, 4, seed = 5),
+      size = 3.5
+    ) +
+    scale_x_discrete(expand = c(.4, 2))
+) 
+```
+
+```{r, class.source = 'fold-hide'}
+plot_pca_3d <- plotPCA3D(vsd, # the transformation used can be changed.
+                         intgroup = colnames(coldata)[1], # the intgroup used can be changed. 
+                         returnData = TRUE)
+
+plot_pca_3d <- plot_ly(
+  plot_pca_3d,
+  x = ~ PC1,
+  y = ~ PC2,
+  z = ~ PC3,
+  text = plot_pca_3d$name,
+  color = ~ group,
+  colors = col.plot.data
+) %>% 
+  add_markers() %>% 
+  add_text(textposition = "top", showlegend = FALSE)
+```
+
+```{r, class.source = 'fold-hide'}
+plot_pca_3d
+```
+
+## Differential expression analysis with DESeq2
+
+Differential expression analysis basically tests whether the mean expression levels are significantly different between sample groups.
+
+![**Differential expression rationale (Image credits: Paul Pavlidis, UBC)**](de_theory.png)
+
+In order to form a proper statistical hypothesis, we need to choose the statistical model that best describes the problem. Even though the software does this for you, you still need to be generally aware of the reasons why.
+
+RNA-Seq data is count-based and, as such, does not follow a normal distribution (you can't have negative counts and you also can't have 2.5 counts). A common distribution for count data is the Poisson; however, it assumes equal mean and variance.
+
+As you must have guessed, RNA-Seq count data exhibits higher variance when compared to the mean, which means that it is "overdispersed" with respect to a Poisson distribution. This happens because of *biological replication* that always introduces some degree of biological variation.
+
+To account for this overdispersion, `DESeq2` (and other similar tools) uses a Negative Binomial distribution to model the counts. After modeling, the software will fit the data to it and then it will perform the statistical test for differentially expressed genes. All of this in a single line of code using a single function: `DESeq()`.
+
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+## Carefull: Time consuming ##
+
+dds2 <- DESeq(dds)
+
+```
+
+The output displays the steps of the analysis and we will look at each one of them to better understand how DESeq2 is performing the statistical analysis and what metrics we should examine to explore the quality of our analysis.
+
+### Estimation of size factors
+
+This step has to be the first in the differential expression analysis because it is absolutely necessary for making accurate comparisons. Normalization consists in scaling the raw counts to account for variability other than the one in which we are interested, i.e., differences in gene expression.
+
+There are three main sources of variability considered during normalization:
+
+1)  Gene length: the longer the gene, the more reads map to it (important when comparing gene expressions from a same sample: *within-sample comparison*) ![Gene length variability](normalization_methods_length.png)
+
+2)  Sequencing depth: the higher the sequencing depth, the more reads map to the same gene (important when comparing genes from different samples, as is the case of differential expression analysis: *between-sample comparison*) ![Sequencing depth variability](normalization_methods_depth.png)
+
+3)  RNA composition: a small number of highly expressed genes between samples can consume a substantial proportion of the total number of reads, causing the remaining genes to be under-sampled in that sample (important in *between-sample comparison*) ![RNA composition variability](normalization_methods_composition.png)
+
+The normalization implementd by `DESeq2` accounts for both sequencing depth and RNA composition and follows the **median ratio method**. For a detailed description of the method, see ["Differential expression analysis for sequence count data"](http://dx.doi.org/10.1186/gb-2010-11-10-r106) and ["Teaching materials at the Harvard Chan Bioinformatics Core"](https://github.com/hbctraining/DGE_workshop/blob/master/lessons/02_DGE_count_normalization.md).
+
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+sizeFactors(dds2)
+```
+
+### Estimation of dispersion
+
+When a negative binomial model is fitted, within-group variability is modeled by the dispersion parameter, a measure of spread or variability in the data. `DESeq2` estimates dispersion in three steps:
+
+1)  Gene-wise dispersion estimation (each gene separately): models the dispersion based on expression level (mean counts of replicates) using maximum likelihood estimation; in other words, given the count values of the replicates, the most likely estimate of dispersion is calculated.
+
+2)  Curve fitting to gene-wise dispersion estimates: next, the function fits a trend curve to the gene-wise estimates to capture the dependence of these estimates on the mean expression strength.
+
+3)  Gene-wise dispersion shrinkage towards the values predicted by the curve: finally, the fitted curve is used as a prior mean for a second estimation round, which results in the final estimates of dispersion. Dispersion estimates below the curve will be shrunk towards it, as well as genes slightly above it; however, genes with extremely high dispersion values are assumed to be dispersion outliers and will not be shrunk towards the curve and considered for for differential expression testing.
+
+```{r dispersion estimates plot}
+
+plotDispEsts(dds2)
+```
+
+This is a good plot to examine to ensure your data is a good fit for the `DESeq2` model. You expect your data to generally scatter around the curve, with the dispersion decreasing with increasing mean expression levels. Note that there are black dots circled in blue. These are dispersion outliers - genes with extremely high dispersion values.
+
+The shrinkage procedure helps avoid potential false positives which can result from underestimates of dispersion.
+
+### Negative Binomial GLM fitting and Wald statistics
+
+The first step in hypothesis testing is to set up a null hypothesis for each gene. The goal here is to determine if, based on the observed data, the null hypothesis is true. In `DESeq2`, by default the Wald test is used for hypothesis testing when comparing two groups. The p-value indicates the probability that a fold change as strong as the observed one, or even stronger, would be seen under the situation described by the null hypothesis. If the p-value resulting from the test is small we reject the null hypothesis and assume the gene as differentially expressed.
+
+```{r }
+(comparison_names <- resultsNames(dds2)) 
+
+which_comparison <- grep(experimental, comparison_names) # depends on `experimental` that can be changed 
+```
+
+We must define a p-value threshold and a adjustment method.
+
+```{r}
+pval_threshold <- 0.05 ## Change for a different threshold ##
+pAdjustMethod <- "fdr" # Change for different methods: p.adjust.methods() ##
+lfcThreshold <- 1 # Change for log2 fold change threshold
+res <- results(
+  dds2,
+  name = comparison_names[which_comparison],
+  pAdjustMethod = pAdjustMethod,
+  lfcThreshold = lfcThreshold,
+  alpha = pval_threshold
+)
+```
+
+Each column in the `res` object means the following
+
+```{r, echo = FALSE}
+datatable(
+  as.data.frame(mcols(res)),
+  options = list(
+    lengthChange = TRUE,
+    scrollX = TRUE,
+    pageLength = 5,
+    lengthMenu = c(5, 10, 15, 20),
+    keys = TRUE,
+    dom = 'Blfrtip',
+    buttons = list(
+      'copy',
+      'print',
+      list(
+        extend = 'collection',
+        buttons = c('csv', 'excel', 'pdf'),
+        text = 'Download'
+      )
+    )
+  ),
+  autoHideNavigation = FALSE,
+  filter = "top",
+  extensions = c('Buttons', 'KeyTable'),
+  rownames = TRUE
+)
+```
+
+Now let's take a look at the results:
+
+```{r, echo = FALSE}
+head(as.data.frame(res))
+```
+
+```{r}
+summary(res)
+```
+
+Number of DEGs with pvalue \< `r pval_threshold`: `r sum(res$pvalue < pval_threshold, na.rm = TRUE)` Number of DEGs with padj (FDR) \< `r pval_threshold`: `r sum(res$padj < pval_threshold, na.rm = TRUE)`
+
+### Visualization
+
+#### Count plots
+
+A quick way to visualize the counts for a particular gene is to use the `plotCounts()` function that takes as arguments the `DESeqDataSet`, a gene name, and the group over which to plot the counts.
+
+In this case we will plot the normalized counts of the most significant gene (minimum p-value) in the previous comparison:
+
+```{r plotCounts,fig.width = 9,fig.height = 6,class.source = 'fold-hide'}
+ggplot(
+  plotCounts(
+    dds2,
+    gene = rownames(res)[which.min(res$padj)], #retrieving the gene name. Can be changed
+    intgroup = colnames(coldata)[3],
+    returnData = TRUE
+  ),
+  aes(x = coldata[,3],
+      y = count,
+      color = coldata[,3])
+) +
+  scale_y_log10() +
+  geom_point(size = 3) + 
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+  
+
+```
+
+The code could be easily changed in order to plot any given gene.
+
+#### Volcano plot
+
+Another commonly used plot to look at differential expression results is the *volcano plot*. This plot allows for a global view of the results and integrates p-value and log fold change information (y- and x-axis, respectively).
+
+```{r}
+
+res.shr <- as.data.frame(res)
+res.shr$ids <- row.names(res.shr)
+setDT(res.shr)[, paste0("c", 1:2) := tstrsplit(ids, "\\|")]
+
+res.shr$Significant <- ifelse(res.shr$padj < pval_threshold,
+                              paste("padj < ",
+                                    pval_threshold,
+                                    sep = ""),
+                              paste("padj > ",
+                                    pval_threshold,
+                                    sep = ""))
+res.shr <- res.shr[!is.na(res.shr$Significant), ]
+res.shr <- res.shr[order(res.shr$padj), ]
+```
+
+```{r, class.source = 'fold-hide'}
+ggplot(res.shr,
+       aes(x = log2FoldChange,
+           y = -log10(padj))) +
+  geom_point(aes(color = Significant)) +
+  scale_color_manual(values = c("turquoise4", "grey")) +
+  theme_bw(base_size = 12) +
+  theme(legend.position = "bottom") +
+  ggtitle(paste("padj < ",
+                pval_threshold,
+                sep = "")) +
+  xlab("log2 fold change") +
+  ylab("-log10(padj)") +
+  geom_text_repel(data = subset(res.shr,
+                                #abs(log2FoldChange) > 20
+                                padj < pval_threshold
+                                )[1:10, ], # can be changed
+                  aes(label = c2),
+                  size = 3,
+                  box.padding = unit(0.35, "lines"),
+                  point.padding = unit(0.3, "lines"))
+```
+
+#### Heatmap
+
+It also can be helpful to see the expression of multiple genes of interest at the same time. Next we are going to plot a heatmap of the normalized count values for the top 20 differentially expressed genes (by padj values).
+
+1)  Determine the top 20 genes by ordering (by padj values) our results and extracting their gene names:
+
+```{r order by padj}
+#Order rows by padj values (from lowest to highest)
+o <- order(res$padj, decreasing = FALSE)
+topgenes <- res[o, ] 
+
+#Extract the first 20 genes
+top20genes <- rownames(topgenes[1:20, ]) # can be changed
+```
+
+2)  Extract the normalized count values for the top 20 genes for only the samples of interest:
+
+```{r extract normalized counts}
+allCounts <- counts(dds2, normalized=TRUE)
+
+#Selects the timepoints in which we are interested
+
+#Subsets the coldata data.frame based on those values
+annotation <- coldata[coldata[,3] %in% c(reference, experimental),] 
+
+#Creates a data.frame based on "allCounts" but comprising only the top 20 genes as rows and the ids of the samples as columns
+top20genesCounts <- as.data.frame(allCounts[top20genes,rownames(annotation)]) 
+```
+
+3)  Plot the heatmap using `pheatmap()`:
+
+```{r plot heatmap}
+heat_colors <- brewer.pal(6, "YlOrRd") # can be changed
+
+
+annotation[, 3] <- factor(annotation[, 3])
+
+pheatmap(top20genesCounts, 
+         color = heat_colors, 
+         show_rownames = T,
+         show_colnames = F,
+         annotation = annotation,  
+         fontsize = 10,
+         cellheight = 10,
+         cellwidth = 10,
+         scale = "row", #plots z-scores instead of normalized count values after the clustering to improve visualization
+         height = 50)
+```
+
+#### Export Table
+
+```{r }
+res.shr_1 <- as.data.frame(res.shr[which(res.shr$pvalue < pval_threshold), ])
+
+res.shr_1 <- 
+  as.data.frame(
+    cbind(res.shr_1,
+          stringr::str_split_fixed(rownames(res.shr_1), "\\|", 2)))
+
+names(res.shr_1)[8:9] <- c("transcriptID", "geneName")
+
+res.shr_1[c(7, 10, 11, 12)] <- NULL
+
+#save in file
+write.table(res.shr_1,
+            paste("results/comparison-",
+                  comparison_names[which_comparison],
+                  "-pvalue",
+                  pval_threshold,
+                  ".txt",sep = ""))
+```
+
+```{r}
+ordering <- res.shr_1[order(res.shr_1$padj), ][1:10, c(7, 8, 2, 5, 6)]
+ordering <- ordering[!is.na(ordering$padj), ]
+
+rownames(ordering) <- NULL
+
+ordering[, 4:5] <- format(ordering[, 4:5], digits = 3)
+```
+
+```{r, echo = FALSE}
+datatable(
+  ordering,
+  options = list(
+    lengthChange = TRUE,
+    scrollX = TRUE,
+    pageLength = 5,
+    lengthMenu = c(5, 10, 15, 20),
+    keys = TRUE,
+    dom = 'Blfrtip',
+    buttons = list(
+      'copy',
+      'print',
+      list(
+        extend = 'collection',
+        buttons = c('csv', 'excel', 'pdf'),
+        text = 'Download'
+      )
+    )
+  ),
+  autoHideNavigation = FALSE,
+  filter = "top",
+  extensions = c('Buttons', 'KeyTable'),
+  rownames = TRUE
+)
+```
